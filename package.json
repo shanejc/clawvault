@@ -2,9 +2,17 @@
   "name": "clawvault",
   "version": "1.0.0",
   "description": "🐘 An elephant never forgets. Structured memory system for AI agents with Obsidian-compatible markdown and embedded semantic search.",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "bin": {
     "clawvault": "./bin/clawvault.js"
   },
