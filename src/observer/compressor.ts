@@ -24,7 +24,9 @@ export type CompressionProvider =
   | 'gemini'
   | 'xai'
   | 'openai-compatible'
-  | 'ollama';
+  | 'ollama'
+  | 'minimax'
+  | 'zai';
 
 type ResolvedCompressionBackend = {
   provider: CompressionProvider;
@@ -42,7 +44,9 @@ const DEFAULT_PROVIDER_MODELS: Record<CompressionProvider, string> = {
   gemini: 'gemini-2.0-flash',
   xai: 'grok-2-latest',
   'openai-compatible': 'gpt-4o-mini',
-  ollama: 'llama3.2'
+  ollama: 'llama3.2',
+  minimax: 'MiniMax-M2.1',
+  zai: 'glm-4.5-air'
 };
 
 const CRITICAL_RE =

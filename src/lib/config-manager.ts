@@ -11,7 +11,9 @@ const OBSERVER_COMPRESSION_PROVIDERS = [
   'xai',
   'openai-compatible',
   'ollama',
-  'openclaw'
+  'openclaw',
+  'minimax',
+  'zai'
 ] as const;
 const THEMES = ['neural', 'minimal', 'none'] as const;
 const CONTEXT_PROFILES = ['default', 'planning', 'incident', 'handoff', 'auto'] as const;
