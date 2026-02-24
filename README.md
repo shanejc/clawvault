@@ -28,6 +28,7 @@ Unlike vector databases or cloud-based memory solutions, ClawVault is:
 - **Markdown-native** — Human-readable, git-friendly, works with Obsidian out of the box.
 - **Graph-aware** — Wiki-links build a knowledge graph that enriches context retrieval.
 - **Session-resilient** — Checkpoint/recover primitives survive crashes and context resets.
+- **Fact-aware** — Write-time extraction builds structured facts with conflict resolution.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -143,16 +144,29 @@ clawvault context --profile planning "Q1 roadmap"
 
 ---
 
+## v3.0 — Structured Memory
+
+ClawVault v3 adds **write-time fact extraction** and **entity graphs** to the core memory pipeline:
+
+- **Fact Store** — Extracts structured facts (preferences, attributes, relationships) at write time with conflict resolution and deduplication
+- **Entity Graph** — Builds a relational graph enabling multi-hop queries ("Alice works at Google + Google is in CA → Alice is in CA")
+- **Hybrid Search** — BM25 + semantic embeddings + Reciprocal Rank Fusion (RRF)
+
 ## Benchmark Results
 
-ClawVault has been evaluated on the **LongMemEval** benchmark for long-term memory in AI agents:
+Evaluated on **LongMemEval** (500 questions, 6 categories) with Gemini Flash + heuristic scoring:
 
-| Metric | Score | Notes |
-|--------|-------|-------|
-| **Overall** | **57%** | Competitive with cloud-based solutions |
-| Memory Retention | 62% | Markdown persistence + graph links |
-| Context Retrieval | 54% | Hybrid semantic + graph traversal |
-| Session Continuity | 71% | Checkpoint/recover primitives |
+| Category | Score | Notes |
+|----------|-------|-------|
+| **Overall** | **49%** | Hybrid BM25+semantic+RRF |
+| Single-session (user) | 34% | Session-level retrieval |
+| Single-session (assistant) | 75% | Best category |
+| Multi-session | 46% | Cross-session reasoning |
+| Temporal reasoning | 52% | Date-aware retrieval |
+| Knowledge updates | 50% | Conflict resolution |
+| Preferences | 33% | Rubric-based evaluation |
+
+> **Note:** Scores vary with LLM backend. Use local models (e.g., Ollama) for reproducible results.
 
 ### Project Stats
 
