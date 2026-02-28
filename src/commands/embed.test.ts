@@ -3,19 +3,28 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const { hasQmdMock, qmdEmbedMock } = vi.hoisted(() => ({
+const {
+  hasQmdMock,
+  recoverQmdEmbeddingIfNeededMock,
+  runCrashSafeQmdEmbedMock
+} = vi.hoisted(() => ({
   hasQmdMock: vi.fn(),
-  qmdEmbedMock: vi.fn()
+  recoverQmdEmbeddingIfNeededMock: vi.fn(),
+  runCrashSafeQmdEmbedMock: vi.fn()
 }));
 
 vi.mock('../lib/search.js', async () => {
   const actual = await vi.importActual<typeof import('../lib/search.js')>('../lib/search.js');
   return {
     ...actual,
-    hasQmd: hasQmdMock,
-    qmdEmbed: qmdEmbedMock
+    hasQmd: hasQmdMock
   };
 });
+
+vi.mock('../lib/qmd-embedding-recovery.js', () => ({
+  recoverQmdEmbeddingIfNeeded: recoverQmdEmbeddingIfNeededMock,
+  runCrashSafeQmdEmbed: runCrashSafeQmdEmbedMock
+}));
 
 vi.mock('../lib/qmd-collections.js', () => ({
   findCollectionByRoot: vi.fn().mockReturnValue(undefined),
@@ -48,6 +57,7 @@ afterEach(() => {
 describe('embed command', () => {
   it('uses vault qmd collection from config', async () => {
     hasQmdMock.mockReturnValue(true);
+    recoverQmdEmbeddingIfNeededMock.mockReturnValue({ recovered: false });
     const vaultPath = makeTempDir('clawvault-embed-');
     const rootPath = path.join(vaultPath, 'notes-root');
     fs.mkdirSync(rootPath, { recursive: true });
@@ -66,7 +76,18 @@ describe('embed command', () => {
     );
 
     const result = await embedCommand({ vaultPath, quiet: true });
-    expect(qmdEmbedMock).toHaveBeenCalledWith('vault-collection');
+    expect(recoverQmdEmbeddingIfNeededMock).toHaveBeenCalledWith({
+      vaultPath: path.resolve(vaultPath),
+      collection: 'vault-collection',
+      rootPath,
+      mode: 'marker-or-empty',
+      onLog: undefined
+    });
+    expect(runCrashSafeQmdEmbedMock).toHaveBeenCalledWith({
+      vaultPath: path.resolve(vaultPath),
+      collection: 'vault-collection',
+      rootPath
+    });
     expect(result.qmdCollection).toBe('vault-collection');
     expect(result.qmdRoot).toBe(rootPath);
   });
@@ -74,6 +95,6 @@ describe('embed command', () => {
   it('throws when qmd is unavailable', async () => {
     hasQmdMock.mockReturnValue(false);
     await expect(embedCommand({ vaultPath: '/tmp/memory', quiet: true })).rejects.toBeInstanceOf(QmdUnavailableError);
-    expect(qmdEmbedMock).not.toHaveBeenCalled();
+    expect(runCrashSafeQmdEmbedMock).not.toHaveBeenCalled();
   });
 });

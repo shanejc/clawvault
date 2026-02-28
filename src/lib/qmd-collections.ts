@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 
 const COLLECTION_HEADER_RE = /^(\S+)\s+\(qmd:\/\/([^)]+)\)\s*$/;
 const DETAIL_LINE_RE = /^\s+([A-Za-z][A-Za-z0-9 _-]*):\s*(.+)\s*$/;
+const QMD_INDEX_ENV_VAR = 'CLAWVAULT_QMD_INDEX';
 
 export interface QmdCollectionInfo {
   name: string;
@@ -43,6 +44,26 @@ function pickCount(details: Record<string, string>, keys: string[]): number | un
     }
   }
   return undefined;
+}
+
+function resolveQmdIndexName(indexName?: string): string | undefined {
+  const explicit = indexName?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const fromEnv = process.env[QMD_INDEX_ENV_VAR]?.trim();
+  return fromEnv || undefined;
+}
+
+function withQmdIndexArgs(args: string[], indexName?: string): string[] {
+  if (args.includes('--index')) {
+    return [...args];
+  }
+  const resolvedIndexName = resolveQmdIndexName(indexName);
+  if (!resolvedIndexName) {
+    return [...args];
+  }
+  return ['--index', resolvedIndexName, ...args];
 }
 
 export function parseQmdCollectionList(raw: string): QmdCollectionInfo[] {
@@ -99,34 +120,46 @@ export function parseQmdCollectionList(raw: string): QmdCollectionInfo[] {
   return collections;
 }
 
-export function listQmdCollections(): QmdCollectionInfo[] {
-  const output = execFileSync('qmd', ['collection', 'list'], {
+export function listQmdCollections(indexName?: string): QmdCollectionInfo[] {
+  const output = execFileSync('qmd', withQmdIndexArgs(['collection', 'list'], indexName), {
     encoding: 'utf-8'
   });
   return parseQmdCollectionList(output);
 }
 
-export function removeQmdCollection(name: string): void {
+export function removeQmdCollection(name: string, indexName?: string): void {
   try {
-    execFileSync('qmd', ['collection', 'remove', name], { stdio: 'ignore' });
+    execFileSync('qmd', withQmdIndexArgs(['collection', 'remove', name], indexName), { stdio: 'ignore' });
     return;
   } catch {
-    execFileSync('qmd', ['collection', 'rm', name], { stdio: 'ignore' });
+    execFileSync('qmd', withQmdIndexArgs(['collection', 'rm', name], indexName), { stdio: 'ignore' });
   }
 }
 
-export function collectionExists(name: string): boolean {
+export function collectionExists(name: string, indexName?: string): boolean {
   try {
-    const collections = listQmdCollections();
+    const collections = listQmdCollections(indexName);
     return collections.some(c => c.name === name);
   } catch {
     return false;
   }
 }
 
-export function findCollectionByRoot(rootPath: string): QmdCollectionInfo | undefined {
+export function getCollectionByName(
+  name: string,
+  indexName?: string
+): QmdCollectionInfo | undefined {
   try {
-    const collections = listQmdCollections();
+    const collections = listQmdCollections(indexName);
+    return collections.find(collection => collection.name === name);
+  } catch {
+    return undefined;
+  }
+}
+
+export function findCollectionByRoot(rootPath: string, indexName?: string): QmdCollectionInfo | undefined {
+  try {
+    const collections = listQmdCollections(indexName);
     const normalizedRoot = rootPath.replace(/\/$/, '');
     return collections.find(c => {
       if (!c.root) return false;
@@ -138,9 +171,9 @@ export function findCollectionByRoot(rootPath: string): QmdCollectionInfo | unde
   }
 }
 
-export function getFirstCollection(): QmdCollectionInfo | undefined {
+export function getFirstCollection(indexName?: string): QmdCollectionInfo | undefined {
   try {
-    const collections = listQmdCollections();
+    const collections = listQmdCollections(indexName);
     return collections[0];
   } catch {
     return undefined;
