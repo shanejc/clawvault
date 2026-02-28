@@ -32,8 +32,10 @@ function writeMarkdown(vaultPath: string, relativePath: string, content: string)
 }
 
 function writeCache(vaultPath: string, data: Record<string, number[]>): void {
+  const cacheBinPath = path.join(vaultPath, '.clawvault', 'embeddings.bin');
   const cachePath = path.join(vaultPath, '.clawvault', 'embeddings.bin.json');
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(cacheBinPath, '', 'utf-8');
   fs.writeFileSync(cachePath, JSON.stringify(data), 'utf-8');
 }
 

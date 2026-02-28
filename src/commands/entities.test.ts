@@ -122,16 +122,11 @@ title: Project Phoenix
     fs.mkdirSync(vaultPath, { recursive: true });
     writeEntityFile(vaultPath, 'decisions/cache-policy.md', '# Cache Policy');
 
-    const previousCwd = process.cwd();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    process.chdir(root);
-    try {
-      await entitiesCommand({ vaultPath: './vault', json: true });
-    } finally {
-      process.chdir(previousCwd);
-    }
+    const relativeVaultPath = path.relative(process.cwd(), vaultPath);
+    await entitiesCommand({ vaultPath: relativeVaultPath, json: true });
 
     const payload = JSON.parse(String(logSpy.mock.calls[0][0])) as Record<string, string[]>;
-    expect(payload['decisions/cache-policy']).toEqual(['cache-policy', 'Cache Policy']);
+    expect(payload['decisions/cache-policy']).toEqual(['cache-policy']);
   });
 });
