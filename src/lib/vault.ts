@@ -26,6 +26,7 @@ import {
 import { SearchEngine, extractWikiLinks, extractTags, hasQmd, qmdUpdate, qmdEmbed, QmdUnavailableError } from './search.js';
 import { buildOrUpdateMemoryGraphIndex } from './memory-graph.js';
 import { loadVaultQmdConfig } from './vault-qmd-config.js';
+import { recoverQmdEmbeddingIfNeeded } from './qmd-embedding-recovery.js';
 
 const CONFIG_FILE = '.clawvault.json';
 const INDEX_FILE = '.clawvault-index.json';
@@ -205,6 +206,23 @@ export class ClawVault {
 
     // Configure search engine with vault info
     this.applyQmdConfig(meta);
+
+    try {
+      const recovery = recoverQmdEmbeddingIfNeeded({
+        vaultPath: this.config.path,
+        collection: this.getQmdCollection(),
+        rootPath: this.getQmdRoot(),
+        mode: 'marker-only',
+        onLog: (message) => console.warn(`[clawvault] ${message}`)
+      });
+      if (recovery.recovered) {
+        console.warn(`[clawvault] qmd embedding recovery finished for "${this.getQmdCollection()}".`);
+      }
+    } catch (err: any) {
+      console.warn(
+        `[clawvault] qmd embedding recovery failed: ${err?.message || 'unknown error'}`
+      );
+    }
 
     // Index all documents (local cache)
     await this.reindex();
