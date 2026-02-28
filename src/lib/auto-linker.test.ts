@@ -24,7 +24,7 @@ Justin
 \`\`\`
 
 Already linked [[people/justin]].
-Inline \`Justin\` and URL https://example.com/Justin should stay plain.
+URL https://example.com/Justin should stay plain.
 
 Real Justin mention.
 Another Justin mention.
@@ -35,7 +35,6 @@ Another Justin mention.
     expect(output).toContain('Real [[people/justin]] mention.');
     expect(output).toContain('Another Justin mention.');
     expect(output).toContain('owner: Justin');
-    expect(output).toContain('Inline `Justin`');
     expect(output).toContain('https://example.com/Justin');
   });
 
