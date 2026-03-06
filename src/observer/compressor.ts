@@ -60,7 +60,9 @@ const DEADLINE_SIGNAL_RE = /\b(?:by\s+(?:monday|tuesday|wednesday|thursday|frida
 const ROLE_PREFIX_RE = /^([a-z][a-z0-9_-]{1,31})\s*:\s*(.+)$/i;
 const BASE64_DATA_URI_RE = /\bdata:[^;\s]+;base64,[A-Za-z0-9+/=]{24,}\b/gi;
 const LONG_BASE64_TOKEN_RE = /\b[A-Za-z0-9+/]{80,}={0,2}\b/g;
-const NOISE_PREFIX_RE = /^(?:metadata|system metadata|session metadata)\s*:/i;
+// Noise prefixes commonly found in OpenClaw transcripts / tool plumbing.
+// These are not durable memories and should not enter the observation pipeline.
+const NOISE_PREFIX_RE = /^(?:metadata|system metadata|session metadata|tool[_-]?result|toolresult)\s*:/i;
 const STRUCTURED_NOISE_MARKER_RE =
   /\b(?:tool[_-]?result|tool[_-]?use|toolcallid|tooluseid|function[_-]?(?:call|result)|stdout|stderr|exitcode|recordedat|trace(?:_|-)?id|parent(?:_|-)?id|session(?:_|-)?id|metadata|base64|mime(?:type)?)\b/i;
 
@@ -204,6 +206,13 @@ export class Compressor {
       return true;
     }
     if (NOISE_PREFIX_RE.test(trimmed)) {
+      return true;
+    }
+
+    // Some OpenClaw tool plumbing prefixes structured payloads, e.g. "toolresult: { ... }".
+    // Treat those as structured noise too.
+    const afterToolResult = trimmed.match(/^tool[_-]?result\s*:\s*(\{.*|\[.*)/i);
+    if (afterToolResult && STRUCTURED_NOISE_MARKER_RE.test(trimmed) && trimmed.length >= 40) {
       return true;
     }
 
