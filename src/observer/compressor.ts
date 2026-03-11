@@ -425,6 +425,8 @@ export class Compressor {
       '- DO NOT observe: CLI errors, command failures, tool output parsing issues, retry attempts, debug logs.',
       '  These are transient noise, not memories. Only observe errors if they represent a BLOCKER or an unresolved problem.',
       '- DO NOT observe: "acknowledged the conversation", "said okay", routine confirmations.',
+      '- DO NOT observe individual steps of routine maintenance (log rotation, backups, cache pruning, health checks, worker restarts) unless something FAILED or required follow-up. If the entire session is routine maintenance with no incidents, emit ONE summary: "- [fact|c=0.90|i=0.20] Routine maintenance completed without incidents."',
+      '- DO NOT observe meeting/session openings like "meeting recap starts now", "client meeting started". These are scene-setters, not memories.',
       '- MERGE related events into single observations. If 5 images were generated, say "Generated 5 images for X" not 5 separate lines.',
       '- MERGE retry sequences: "Tried X, failed, tried Y, succeeded" → "Resolved X using Y (after initial failure)"',
       '- Prefer OUTCOMES over PROCESSES: "Deployed v1.2 to Railway" not "Started deploy... build finished... deploy succeeded"',
