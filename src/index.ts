@@ -89,6 +89,10 @@ export type {
 } from './commands/doctor.js';
 export { embedCommand, registerEmbedCommand } from './commands/embed.js';
 export type { EmbedCommandOptions, EmbedCommandResult } from './commands/embed.js';
+export { inboxAddCommand, registerInboxCommand } from './commands/inbox.js';
+export type { InboxAddCommandOptions } from './commands/inbox.js';
+export { maintainCommand, registerMaintainCommand } from './commands/maintain.js';
+export type { MaintainCommandOptions } from './commands/maintain.js';
 export { replayCommand, registerReplayCommand } from './commands/replay.js';
 export type { ReplayCommandOptions } from './commands/replay.js';
 export {

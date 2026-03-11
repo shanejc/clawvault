@@ -4,6 +4,8 @@ import { registerInjectCommand } from '../commands/inject.js';
 import { registerObserveCommand } from '../commands/observe.js';
 import { registerReflectCommand } from '../commands/reflect.js';
 import { registerEmbedCommand } from '../commands/embed.js';
+import { registerInboxCommand } from '../commands/inbox.js';
+import { registerMaintainCommand } from '../commands/maintain.js';
 import { registerTailscaleCommands } from '../commands/tailscale.js';
 import { registerWorkgraphCommands } from '../commands/workgraph.js';
 
@@ -13,6 +15,8 @@ export function registerCliCommands(program: Command): Command {
   registerObserveCommand(program);
   registerReflectCommand(program);
   registerEmbedCommand(program);
+  registerInboxCommand(program);
+  registerMaintainCommand(program);
   registerTailscaleCommands(program);
   registerWorkgraphCommands(program);
   return program;

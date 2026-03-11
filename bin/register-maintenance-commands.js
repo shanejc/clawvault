@@ -4,6 +4,29 @@
  */
 
 export function registerMaintenanceCommands(program, { chalk }) {
+  // === MAINTAIN ===
+  program
+    .command('maintain')
+    .description('Run background inbox maintenance workers')
+    .option('--worker <name>', 'Run a single worker (curator|janitor|distiller|surveyor)')
+    .option('--limit <n>', 'Limit inbox items processed per worker', (value) => Number.parseInt(value, 10))
+    .option('--dry-run', 'Preview actions without writing files')
+    .option('-v, --vault <path>', 'Vault path')
+    .action(async (options) => {
+      try {
+        const { maintainCommand } = await import('../dist/commands/maintain.js');
+        await maintainCommand({
+          vaultPath: options.vault,
+          worker: options.worker,
+          limit: options.limit,
+          dryRun: options.dryRun
+        });
+      } catch (err) {
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      }
+    });
+
   // === DOCTOR (health check) ===
   program
     .command('doctor')

@@ -35,7 +35,7 @@ describe('CLI command registration modules', () => {
     });
 
     const names = listCommandNames(program);
-    expect(names).toEqual(expect.arrayContaining(['init', 'setup', 'store', 'capture']));
+    expect(names).toEqual(expect.arrayContaining(['init', 'setup', 'store', 'capture', 'inbox']));
   });
 
   it('registers query commands with profile option', () => {
@@ -121,6 +121,7 @@ describe('CLI command registration modules', () => {
     const names = listCommandNames(program);
     expect(names).toEqual(expect.arrayContaining([
       'doctor',
+      'maintain',
       'embed',
       'compat',
       'graph',

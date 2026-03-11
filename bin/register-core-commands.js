@@ -234,4 +234,32 @@ export function registerCoreCommands(
         process.exit(1);
       }
     });
+
+  // === INBOX ===
+  const inbox = program
+    .command('inbox')
+    .description('Manage raw captures in the inbox');
+
+  inbox
+    .command('add [content]')
+    .description('Add content to inbox (or pipe stdin)')
+    .option('-t, --title <title>', 'Capture title')
+    .option('--source <source>', 'Capture source label')
+    .option('--stdin', 'Read content from stdin')
+    .option('-v, --vault <path>', 'Vault path')
+    .action(async (content, options) => {
+      try {
+        const { inboxAddCommand } = await import('../dist/commands/inbox.js');
+        await inboxAddCommand({
+          vaultPath: options.vault,
+          content,
+          title: options.title,
+          source: options.source,
+          stdin: options.stdin || !process.stdin.isTTY
+        });
+      } catch (err) {
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      }
+    });
 }
