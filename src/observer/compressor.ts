@@ -417,12 +417,12 @@ export class Compressor {
       '',
       'TASK AND TYPE EXTRACTION (required — type accuracy is critical):',
       '- [todo] — Explicit action items with TODO-like phrasing: "TODO:", "we need to", "don\'t forget", "remember to", "make sure to", "send X to Y". Prefix content with "TODO: ".',
-      '- [task] — ONLY use when someone commits to doing something themselves using intent language: "I\'ll", "let me", "going to", "plan to". If in doubt between [task] and [todo], prefer [todo].',
-      '- [commitment] — When a person or organization PROMISES something: "committed to", "agreed to", "will deliver by". Prefix with "[COMMITMENT]".',
+      '- [task] — RARELY used. Only for internal action items that don\'t rise to a commitment. Prefer [todo] or [commitment] over [task].',
+      '- [commitment] — When ANYONE promises/agrees/will-do something: "I\'ll", "I will", "we will", "committed to", "agreed to". "I will publish X" = commitment. "I will coordinate X" = commitment. Prefix with "[COMMITMENT]".',
       '- [commitment-unresolved] — Unresolved commitments/questions: "need to figure out", "TBD", "to be determined".',
-      '- [decision] — Explicit choices made: "decided to", "agreement reached", "chose X over Y". Prefix with "Decision: ".',
+      '- [decision] — Explicit choices, agreements, pricing: "decided to", "agreed on", "chose X over Y", "pricing set at". "Agreed on $48K" = decision, NOT fact. Prefix with "Decision: ".',
       '- [relationship] — Information about people: approvals, role mentions, who did what. Use when a PERSON takes a notable action.',
-      '- [fact] — Only for neutral factual observations that don\'t fit above categories. NOT for action items, decisions, or commitments.',
+      '- [fact] — Only for neutral factual observations that don\'t fit above categories. NOT for action items, decisions, commitments, or agreements.',
       '- Deadline language ("by Friday", "before the demo", "deadline is") increases importance.',
       '',
       'QUALITY FILTERS (important):',
@@ -717,6 +717,16 @@ export class Compressor {
     let importance = record.importance;
     let confidence = record.confidence;
     let type = record.type;
+
+    // Content-based type overrides (highest priority — these come from the LLM's own signals)
+    if (/\[COMMITMENT\]/i.test(record.content)) {
+      type = 'commitment';
+    } else if (/^Decision:\s/i.test(record.content)) {
+      type = 'decision';
+    } else if (/^TODO:\s/i.test(record.content)) {
+      type = 'todo';
+    }
+
     const inferredTaskType = this.inferTaskType(record.content);
 
     if (this.isCriticalContent(record.content)) {
@@ -730,7 +740,8 @@ export class Compressor {
       confidence = Math.max(confidence, 0.75);
     }
 
-    if (inferredTaskType) {
+    // Only apply inferred task type if no content-based override was set
+    if (inferredTaskType && type !== 'commitment' && type !== 'decision') {
       type = type === 'fact' || type === 'commitment' ? inferredTaskType : type;
       importance = Math.max(importance, inferredTaskType === 'commitment-unresolved' ? 0.72 : 0.65);
       confidence = Math.max(confidence, 0.8);
