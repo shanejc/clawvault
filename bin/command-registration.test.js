@@ -165,4 +165,14 @@ describe('CLI command registration modules', () => {
     const unique = new Set(names);
     expect(unique.size).toBe(names.length);
   });
+
+  it('does not register removed workgraph commands', () => {
+    const program = registerAllCommandModules(new Command());
+    const names = listCommandNames(program);
+
+    expect(names).not.toContain('wg');
+    expect(names).not.toContain('thread');
+    expect(names).not.toContain('primitive');
+    expect(names).not.toContain('ledger');
+  });
 });

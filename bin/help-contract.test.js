@@ -39,4 +39,14 @@ describe('CLI help contract', () => {
     expect(projectListHelp).toContain('archived projects are hidden');
     expect(projectBoardHelp).toContain('default: status');
   });
+
+  it('does not advertise removed workgraph commands', () => {
+    const program = registerAllCommandModules();
+    const names = program.commands.map((command) => command.name());
+
+    expect(names).not.toContain('wg');
+    expect(names).not.toContain('thread');
+    expect(names).not.toContain('primitive');
+    expect(names).not.toContain('ledger');
+  });
 });

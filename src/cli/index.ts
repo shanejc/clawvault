@@ -8,7 +8,6 @@ import { registerEmbedCommand } from '../commands/embed.js';
 import { registerInboxCommand } from '../commands/inbox.js';
 import { registerMaintainCommand } from '../commands/maintain.js';
 import { registerTailscaleCommands } from '../commands/tailscale.js';
-import { registerWorkgraphCommands } from '../commands/workgraph.js';
 
 export function registerCliCommands(program: Command): Command {
   registerBenchmarkCommand(program);
@@ -20,6 +19,5 @@ export function registerCliCommands(program: Command): Command {
   registerInboxCommand(program);
   registerMaintainCommand(program);
   registerTailscaleCommands(program);
-  registerWorkgraphCommands(program);
   return program;
 }
