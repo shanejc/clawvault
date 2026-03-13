@@ -317,3 +317,115 @@ describe('xAI (Grok) provider integration', () => {
     });
   });
 });
+
+describe('tiered model resolution', () => {
+  let vaultDir: string;
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawvault-model-tier-'));
+    savedEnv = {
+      CLAWVAULT_PATH: process.env.CLAWVAULT_PATH,
+      CLAWVAULT_MODEL: process.env.CLAWVAULT_MODEL,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY
+    };
+    process.env.CLAWVAULT_PATH = vaultDir;
+    process.env.OPENAI_API_KEY = 'openai-test-key';
+    delete process.env.CLAWVAULT_MODEL;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      } else {
+        delete process.env[key];
+      }
+    }
+    fs.rmSync(vaultDir, { recursive: true, force: true });
+  });
+
+  function writeVaultConfig(payload: Record<string, unknown>): void {
+    fs.writeFileSync(path.join(vaultDir, '.clawvault.json'), JSON.stringify(payload), 'utf-8');
+  }
+
+  it('uses configured tier model from .clawvault.json', async () => {
+    writeVaultConfig({
+      models: {
+        background: 'claude-haiku-4-5',
+        default: 'claude-sonnet-4-5',
+        complex: 'claude-opus-4'
+      }
+    });
+
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(init?.body as string);
+      expect(body.model).toBe('claude-haiku-4-5');
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }]
+        })
+      } as Response;
+    };
+
+    const output = await requestLlmCompletion({
+      provider: 'openai',
+      prompt: 'hello',
+      tier: 'background',
+      fetchImpl
+    });
+    expect(output).toBe('ok');
+  });
+
+  it('falls back to models.default when tier-specific model is missing', async () => {
+    writeVaultConfig({
+      models: {
+        default: 'claude-sonnet-4-5'
+      }
+    });
+
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(init?.body as string);
+      expect(body.model).toBe('claude-sonnet-4-5');
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }]
+        })
+      } as Response;
+    };
+
+    const output = await requestLlmCompletion({
+      provider: 'openai',
+      prompt: 'hello',
+      tier: 'complex',
+      fetchImpl
+    });
+    expect(output).toBe('ok');
+  });
+
+  it('falls back to CLAWVAULT_MODEL when no tier config exists', async () => {
+    writeVaultConfig({ name: 'test' });
+    process.env.CLAWVAULT_MODEL = 'gpt-4o-mini-cheap';
+
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(init?.body as string);
+      expect(body.model).toBe('gpt-4o-mini-cheap');
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }]
+        })
+      } as Response;
+    };
+
+    const output = await requestLlmCompletion({
+      provider: 'openai',
+      prompt: 'hello',
+      tier: 'complex',
+      fetchImpl
+    });
+    expect(output).toBe('ok');
+  });
+});

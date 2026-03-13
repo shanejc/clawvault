@@ -102,7 +102,8 @@ export async function runSurveyorWorker(
           inboxCount,
           categoryCounts: survey.categoryCounts
         }, null, 2)
-      ].join('\n\n')
+      ].join('\n\n'),
+      { tier: 'complex' }
     );
     usedLlm = llmSuggestions.trim().length > 0;
   }

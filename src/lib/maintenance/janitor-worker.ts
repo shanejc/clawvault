@@ -163,7 +163,8 @@ export async function runJanitorWorker(
         `duplicatesMoved=${duplicatesMoved}`,
         `staleArchived=${staleArchived}`,
         `mergedClusters=${clusters.length}`
-      ].join('\n')
+      ].join('\n'),
+      { tier: 'background' }
     );
     usedLlm = llmRecommendation.trim().length > 0;
   }

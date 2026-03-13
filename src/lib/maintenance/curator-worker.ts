@@ -39,7 +39,11 @@ export async function runCuratorWorker(
   let llmRoutes = new Map<string, string>();
 
   if (pending.length > 0 && llm.enabled) {
-    const response = await llm.complete(CURATOR_SYSTEM_PROMPT, buildCuratorLlmPrompt(pending));
+    const response = await llm.complete(
+      CURATOR_SYSTEM_PROMPT,
+      buildCuratorLlmPrompt(pending),
+      { tier: 'background' }
+    );
     if (response.trim()) {
       llmRoutes = parseCuratorRoutes(response);
       usedLlm = llmRoutes.size > 0;

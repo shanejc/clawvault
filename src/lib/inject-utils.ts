@@ -606,6 +606,7 @@ async function addLlmIntentMatches(params: {
     provider: params.provider,
     prompt,
     model: params.model,
+    tier: 'complex',
     temperature: 0.1,
     maxTokens: 1200,
     fetchImpl: params.fetchImpl,

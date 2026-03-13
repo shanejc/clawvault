@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   createGeminiFlashAdapter,
   createDefaultAdapter,
@@ -77,7 +80,8 @@ describe('createDefaultAdapter', () => {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       XAI_API_KEY: process.env.XAI_API_KEY,
-      OPENCLAW_HOME: process.env.OPENCLAW_HOME
+      OPENCLAW_HOME: process.env.OPENCLAW_HOME,
+      CLAWVAULT_PATH: process.env.CLAWVAULT_PATH
     };
     delete process.env.GEMINI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
@@ -126,7 +130,8 @@ describe('createFactExtractionAdapter', () => {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       XAI_API_KEY: process.env.XAI_API_KEY,
-      OPENCLAW_HOME: process.env.OPENCLAW_HOME
+      OPENCLAW_HOME: process.env.OPENCLAW_HOME,
+      CLAWVAULT_PATH: process.env.CLAWVAULT_PATH
     };
     delete process.env.GEMINI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
@@ -167,6 +172,36 @@ describe('createFactExtractionAdapter', () => {
     const adapter = createFactExtractionAdapter({ provider: 'anthropic' });
     expect(adapter.isAvailable()).toBe(true);
     expect(adapter.getProvider()).toBe('anthropic');
+  });
+
+  it('uses complex tier model from vault config for LLM fact extraction', async () => {
+    const vaultPath = fs.mkdtempSync(path.join(os.tmpdir(), 'clawvault-fact-tier-'));
+    try {
+      fs.writeFileSync(path.join(vaultPath, '.clawvault.json'), JSON.stringify({
+        models: {
+          complex: 'gemini-2.5-pro'
+        }
+      }), 'utf-8');
+      process.env.CLAWVAULT_PATH = vaultPath;
+      process.env.GEMINI_API_KEY = 'gemini-key';
+
+      const fetchImpl: typeof fetch = async (input) => {
+        const url = typeof input === 'string' ? input : (input as Request).url;
+        expect(url).toContain('gemini-2.5-pro:generateContent');
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [{ content: { parts: [{ text: 'ok' }] } }]
+          })
+        } as Response;
+      };
+
+      const adapter = createFactExtractionAdapter({ fetchImpl });
+      const result = await adapter.call('extract this');
+      expect(result).toBe('ok');
+    } finally {
+      fs.rmSync(vaultPath, { recursive: true, force: true });
+    }
   });
 });
 

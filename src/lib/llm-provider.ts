@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 export type LlmProvider = 'anthropic' | 'openai' | 'gemini' | 'xai' | 'openclaw';
+export type LlmModelTier = 'background' | 'default' | 'complex';
 
 const DEFAULT_MODELS: Record<LlmProvider, string> = {
   anthropic: 'claude-3-5-haiku-latest',
@@ -13,6 +14,8 @@ const DEFAULT_MODELS: Record<LlmProvider, string> = {
 };
 
 const XAI_BASE_URL = 'https://api.x.ai/v1';
+const VAULT_CONFIG_FILE = '.clawvault.json';
+const LLM_MODEL_TIERS: LlmModelTier[] = ['background', 'default', 'complex'];
 
 export interface OpenClawProviderConfig {
   baseUrl: string;
@@ -47,11 +50,14 @@ export interface LlmCompletionOptions {
   prompt: string;
   provider?: LlmProvider | null;
   model?: string;
+  tier?: LlmModelTier;
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
   fetchImpl?: typeof fetch;
 }
+
+type TieredModelConfig = Partial<Record<LlmModelTier, string>>;
 
 /**
  * Resolve the local OpenClaw home directory.
@@ -167,6 +173,91 @@ export function resolveLlmProvider(): LlmProvider | null {
   return null;
 }
 
+function resolveNearestVaultPath(startPath: string): string | null {
+  let current = path.resolve(startPath);
+  while (true) {
+    if (fs.existsSync(path.join(current, VAULT_CONFIG_FILE))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function resolveVaultPathForModelConfig(): string | null {
+  const configuredVaultPath = process.env.CLAWVAULT_PATH?.trim();
+  if (configuredVaultPath) {
+    return path.resolve(configuredVaultPath);
+  }
+  return resolveNearestVaultPath(process.cwd());
+}
+
+function readTieredModelConfig(): TieredModelConfig | null {
+  const vaultPath = resolveVaultPathForModelConfig();
+  if (!vaultPath) {
+    return null;
+  }
+
+  const configPath = path.join(vaultPath, VAULT_CONFIG_FILE);
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const models = (parsed as Record<string, unknown>).models;
+    if (!models || typeof models !== 'object' || Array.isArray(models)) {
+      return null;
+    }
+
+    const normalized: TieredModelConfig = {};
+    for (const tier of LLM_MODEL_TIERS) {
+      const candidate = (models as Record<string, unknown>)[tier];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        normalized[tier] = candidate.trim();
+      }
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTieredModel(tier: LlmModelTier): string | null {
+  const tieredConfig = readTieredModelConfig();
+  if (!tieredConfig) {
+    return null;
+  }
+  return tieredConfig[tier] ?? tieredConfig.default ?? null;
+}
+
+function resolveRequestModel(options: LlmCompletionOptions, fallbackModel: string): string {
+  if (typeof options.model === 'string' && options.model.trim()) {
+    return options.model.trim();
+  }
+
+  const tier = options.tier ?? 'default';
+  const configuredTierModel = resolveTieredModel(tier);
+  if (configuredTierModel) {
+    return configuredTierModel;
+  }
+
+  const envModel = process.env.CLAWVAULT_MODEL?.trim();
+  if (envModel) {
+    return envModel;
+  }
+
+  return fallbackModel;
+}
+
 export async function requestLlmCompletion(options: LlmCompletionOptions): Promise<string> {
   const provider = options.provider ?? resolveLlmProvider();
   if (!provider) {
@@ -203,7 +294,7 @@ async function callAnthropic(options: LlmCompletionOptions, provider: LlmProvide
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: options.model ?? DEFAULT_MODELS[provider],
+      model: resolveRequestModel(options, DEFAULT_MODELS[provider]),
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1200,
       messages: [{ role: 'user', content: options.prompt }]
@@ -244,7 +335,7 @@ async function callOpenAI(options: LlmCompletionOptions, provider: LlmProvider):
       authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: options.model ?? DEFAULT_MODELS[provider],
+      model: resolveRequestModel(options, DEFAULT_MODELS[provider]),
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1200,
       messages
@@ -281,7 +372,7 @@ async function callXAI(options: LlmCompletionOptions, provider: LlmProvider): Pr
       authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: options.model ?? DEFAULT_MODELS[provider],
+      model: resolveRequestModel(options, DEFAULT_MODELS[provider]),
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1200,
       messages
@@ -305,7 +396,7 @@ async function callGemini(options: LlmCompletionOptions, provider: LlmProvider):
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const model = options.model ?? DEFAULT_MODELS[provider];
+  const model = resolveRequestModel(options, DEFAULT_MODELS[provider]);
   const response = await fetchImpl(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
@@ -356,7 +447,7 @@ async function callOpenClaw(options: LlmCompletionOptions): Promise<string> {
       authorization: `Bearer ${config.apiKey}`
     },
     body: JSON.stringify({
-      model: options.model ?? config.defaultModel,
+      model: resolveRequestModel(options, config.defaultModel),
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1200,
       messages

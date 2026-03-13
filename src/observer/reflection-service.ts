@@ -292,6 +292,7 @@ async function maybeGenerateLlmReflection(
     const output = await requestLlmCompletion({
       provider,
       prompt,
+      tier: 'default',
       temperature: 0.1,
       maxTokens: 1200
     });

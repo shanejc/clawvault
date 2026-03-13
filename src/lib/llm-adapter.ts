@@ -6,13 +6,19 @@
  * the existing LLM provider infrastructure.
  */
 
-import { requestLlmCompletion, resolveLlmProvider, type LlmProvider } from './llm-provider.js';
+import {
+  requestLlmCompletion,
+  resolveLlmProvider,
+  type LlmProvider,
+  type LlmModelTier
+} from './llm-provider.js';
 
 export type FactExtractionMode = 'off' | 'rule' | 'llm' | 'hybrid';
 
 export interface LlmAdapterOptions {
   provider?: LlmProvider | null;
   model?: string;
+  tier?: LlmModelTier;
   temperature?: number;
   maxTokens?: number;
   fetchImpl?: typeof fetch;
@@ -35,7 +41,6 @@ export interface LlmAdapter {
   getProvider(): LlmProvider | null;
 }
 
-const GEMINI_FLASH_MODEL = 'gemini-2.0-flash';
 const OLLAMA_DEFAULT_MODEL = 'llama3.1:8b';
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 
@@ -55,7 +60,8 @@ export function createGeminiFlashAdapter(options: LlmAdapterOptions = {}): LlmAd
       return requestLlmCompletion({
         prompt,
         provider: 'gemini',
-        model: options.model ?? GEMINI_FLASH_MODEL,
+        model: options.model,
+        tier: options.tier ?? 'complex',
         temperature: options.temperature ?? 0.1,
         maxTokens: options.maxTokens ?? 2000,
         fetchImpl: options.fetchImpl
@@ -150,6 +156,7 @@ export function createDefaultAdapter(options: LlmAdapterOptions = {}): LlmAdapte
         prompt,
         provider: resolvedProvider,
         model: options.model,
+        tier: options.tier ?? 'default',
         temperature: options.temperature ?? 0.1,
         maxTokens: options.maxTokens ?? 2000,
         fetchImpl: options.fetchImpl
@@ -176,23 +183,28 @@ export function createDefaultAdapter(options: LlmAdapterOptions = {}): LlmAdapte
  * 4. Fall back to default provider resolution
  */
 export function createFactExtractionAdapter(options: LlmAdapterOptions = {}): LlmAdapter {
+  const factExtractionOptions: LlmAdapterOptions = {
+    ...options,
+    tier: options.tier ?? 'complex'
+  };
+
   if (options.provider) {
-    return createDefaultAdapter(options);
+    return createDefaultAdapter(factExtractionOptions);
   }
 
-  const geminiAdapter = createGeminiFlashAdapter(options);
+  const geminiAdapter = createGeminiFlashAdapter(factExtractionOptions);
   if (geminiAdapter.isAvailable()) {
     return geminiAdapter;
   }
 
   // Ollama is always "available" optimistically — it fails gracefully on call()
   // and extractFactsLlm falls back to rule-based extraction
-  const ollamaAdapter = createOllamaAdapter(options);
+  const ollamaAdapter = createOllamaAdapter(factExtractionOptions);
   if (ollamaAdapter.isAvailable()) {
     return ollamaAdapter;
   }
 
-  return createDefaultAdapter(options);
+  return createDefaultAdapter(factExtractionOptions);
 }
 
 /**

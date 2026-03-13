@@ -72,7 +72,11 @@ export async function runDistillerWorker(
   let usedLlm = false;
 
   if (llm.enabled && longForm.length > 0) {
-    const response = await llm.complete(DISTILLER_SYSTEM_PROMPT, buildDistillerLlmPrompt(longForm));
+    const response = await llm.complete(
+      DISTILLER_SYSTEM_PROMPT,
+      buildDistillerLlmPrompt(longForm),
+      { tier: 'complex' }
+    );
     if (response.trim()) {
       llmInsights = parseDistillerInsights(response);
       usedLlm = llmInsights.size > 0;
