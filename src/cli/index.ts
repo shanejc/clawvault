@@ -7,6 +7,7 @@ import { registerReflectCommand } from '../commands/reflect.js';
 import { registerEmbedCommand } from '../commands/embed.js';
 import { registerInboxCommand } from '../commands/inbox.js';
 import { registerMaintainCommand } from '../commands/maintain.js';
+import { registerPatchCommand } from '../commands/patch.js';
 import { registerTailscaleCommands } from '../commands/tailscale.js';
 
 export function registerCliCommands(program: Command): Command {
@@ -18,6 +19,7 @@ export function registerCliCommands(program: Command): Command {
   registerEmbedCommand(program);
   registerInboxCommand(program);
   registerMaintainCommand(program);
+  registerPatchCommand(program);
   registerTailscaleCommands(program);
   return program;
 }
