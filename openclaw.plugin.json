@@ -2,6 +2,7 @@
   "id": "clawvault",
   "name": "ClawVault",
   "version": "2.7.0",
+  "kind": "memory",
   "description": "Structured memory system for AI agents with context death resilience",
   "configSchema": {
     "type": "object",
@@ -103,6 +104,28 @@
         "maximum": 20,
         "description": "Maximum number of context results to inject on session start",
         "default": 4
+      },
+      "enableBeforePromptRecall": {
+        "type": "boolean",
+        "description": "Enable before_prompt_build memory recall directives and vault context injection.",
+        "default": true
+      },
+      "enableMessageSendingFilter": {
+        "type": "boolean",
+        "description": "Enable outbound message filtering via message_sending hook.",
+        "default": true
+      },
+      "enforceCommunicationProtocol": {
+        "type": "boolean",
+        "description": "Append communication protocol rules to system context and enforce rewrites.",
+        "default": true
+      },
+      "minQuestionRecallScore": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Minimum memory_search score used when checking outbound questions for existing answers.",
+        "default": 0.35
       }
     },
     "additionalProperties": false
@@ -176,6 +199,22 @@
     "maxContextResults": {
       "label": "Max Context Results",
       "description": "Number of vault memories to inject"
+    },
+    "enableBeforePromptRecall": {
+      "label": "Enable Before Prompt Recall",
+      "description": "Use before_prompt_build to force memory recall and inject vault context."
+    },
+    "enableMessageSendingFilter": {
+      "label": "Enable Message Sending Filter",
+      "description": "Use message_sending to rewrite or block protocol violations."
+    },
+    "enforceCommunicationProtocol": {
+      "label": "Enforce Communication Protocol",
+      "description": "Append protocol rules to system context and enforce banned-pattern rewrites."
+    },
+    "minQuestionRecallScore": {
+      "label": "Min Question Recall Score",
+      "description": "Score threshold when deciding if outbound questions are already answered by memory."
     },
     "observeOnHeartbeat": {
       "label": "Observe on Heartbeat (Legacy Alias)",
