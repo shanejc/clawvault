@@ -1,8 +1,81 @@
+import * as path from "path";
+import { ClawVault } from "../lib/vault.js";
+import { buildSessionRecap } from "../commands/session-recap.js";
+import type { SearchResult } from "../types.js";
 import type { ClawVaultPluginConfig } from "./config.js";
-import { resolveVaultPathForAgent, runClawvault, parseContextJson, parseSessionRecapJson, formatSessionContextInjection, sanitizePromptForContext, resolveSessionKey, type ContextEntry, type SessionRecapEntry } from "./clawvault-cli.js";
+import {
+  resolveVaultPathForAgent,
+  formatSessionContextInjection,
+  sanitizeForDisplay,
+  sanitizePromptForContext,
+  resolveSessionKey,
+  type ContextEntry,
+  type SessionRecapEntry
+} from "./clawvault-cli.js";
 
 const DEFAULT_MAX_CONTEXT_RESULTS = 4;
 const DEFAULT_MAX_RECAP_RESULTS = 6;
+const DEFAULT_MIN_SCORE = 0.2;
+const MAX_CONTEXT_SNIPPET_LENGTH = 220;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function truncateContextSnippet(snippet: string): string {
+  const normalized = sanitizeForDisplay(snippet).replace(/\s+/g, " ").trim();
+  if (normalized.length <= MAX_CONTEXT_SNIPPET_LENGTH) {
+    return normalized;
+  }
+  return `${normalized.slice(0, MAX_CONTEXT_SNIPPET_LENGTH - 3).trimEnd()}...`;
+}
+
+function toRelativeVaultPath(vaultPath: string, absolutePath: string): string {
+  const rel = path.relative(vaultPath, absolutePath).replace(/\\/g, "/");
+  return rel.startsWith(".") ? path.basename(absolutePath) : rel;
+}
+
+function formatAgeLabel(modifiedAt: Date): string {
+  const modified = modifiedAt.getTime();
+  if (!Number.isFinite(modified)) {
+    return "unknown age";
+  }
+
+  const elapsedMs = Date.now() - modified;
+  if (elapsedMs < ONE_DAY_MS) {
+    return "today";
+  }
+  const days = Math.max(1, Math.floor(elapsedMs / ONE_DAY_MS));
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) {
+    return `${weeks}w ago`;
+  }
+  const months = Math.floor(days / 30);
+  if (months < 12) {
+    return `${months}mo ago`;
+  }
+  const years = Math.floor(days / 365);
+  return `${years}y ago`;
+}
+
+function mapSearchResultToContextEntry(vaultPath: string, result: SearchResult): ContextEntry | null {
+  const snippet = truncateContextSnippet(result.snippet);
+  if (!snippet) {
+    return null;
+  }
+
+  return {
+    title: sanitizeForDisplay(result.document.title || "Untitled"),
+    path: sanitizeForDisplay(toRelativeVaultPath(vaultPath, result.document.path)),
+    age: formatAgeLabel(result.document.modified),
+    snippet,
+    score: Number.isFinite(result.score) ? result.score : 0
+  };
+}
 
 export interface VaultContextInjectorOptions {
   prompt: string;
@@ -27,17 +100,25 @@ export async function fetchSessionRecapEntries(
   const sessionKey = resolveSessionKey(options.sessionKey);
   if (!sessionKey) return [];
 
-  const recapArgs = ["session-recap", sessionKey, "--format", "json"];
-  if (options.agentId) {
-    recapArgs.push("--agent", options.agentId);
-  }
-
-  const recapResult = runClawvault(recapArgs, options.pluginConfig, { timeoutMs: 20_000 });
-  if (!recapResult.success) {
+  try {
+    const recap = await buildSessionRecap(sessionKey, {
+      agentId: options.agentId,
+      limit: DEFAULT_MAX_RECAP_RESULTS
+    });
+    return recap.messages
+      .slice(-DEFAULT_MAX_RECAP_RESULTS)
+      .map((entry) => {
+        const text = sanitizeForDisplay(entry.text);
+        if (!text) return null;
+        return {
+          role: entry.role === "user" ? "User" : "Assistant",
+          text
+        } satisfies SessionRecapEntry;
+      })
+      .filter((entry): entry is SessionRecapEntry => Boolean(entry));
+  } catch {
     return [];
   }
-
-  return parseSessionRecapJson(recapResult.output, DEFAULT_MAX_RECAP_RESULTS);
 }
 
 export async function fetchMemoryContextEntries(
@@ -57,31 +138,24 @@ export async function fetchMemoryContextEntries(
   }
 
   const maxResults = Number.isFinite(options.maxResults)
-    ? Math.max(1, Math.min(20, Number(options.maxResults)))
+    ? clamp(Math.floor(Number(options.maxResults)), 1, 20)
     : DEFAULT_MAX_CONTEXT_RESULTS;
-  const profile = options.contextProfile ?? options.pluginConfig.contextProfile ?? "auto";
 
-  const contextArgs = [
-    "context",
-    prompt,
-    "--format",
-    "json",
-    "--profile",
-    profile,
-    "--limit",
-    String(maxResults),
-    "-v",
-    vaultPath
-  ];
-  const contextResult = runClawvault(contextArgs, options.pluginConfig, { timeoutMs: 25_000 });
-  if (!contextResult.success) {
+  try {
+    const vault = new ClawVault(vaultPath);
+    await vault.load();
+    const matches = await vault.find(prompt, {
+      limit: maxResults,
+      minScore: DEFAULT_MIN_SCORE,
+      temporalBoost: true
+    });
+    const entries = matches
+      .map((match) => mapSearchResultToContextEntry(vaultPath, match))
+      .filter((entry): entry is ContextEntry => Boolean(entry));
+    return { entries, vaultPath };
+  } catch {
     return { entries: [], vaultPath };
   }
-
-  return {
-    entries: parseContextJson(contextResult.output, maxResults),
-    vaultPath
-  };
 }
 
 export async function buildVaultContextInjection(

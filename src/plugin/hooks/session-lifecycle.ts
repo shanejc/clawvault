@@ -16,14 +16,15 @@ import {
   fetchSessionRecapEntries
 } from "../vault-context-injector.js";
 import {
-  parseRecoveryOutput,
   resolveVaultPathForAgent,
-  runClawvault,
   runObserverCron,
   formatSessionContextInjection
 } from "../clawvault-cli.js";
 import type { ClawVaultPluginRuntimeState } from "../runtime-state.js";
 import { runFactExtractionForEvent } from "../fact-extractor.js";
+import { recover as recoverContext } from "../../commands/recover.js";
+import { checkpoint as saveCheckpoint, flush as flushCheckpoint } from "../../commands/checkpoint.js";
+import { runReflection } from "../../observer/reflection-service.js";
 
 export interface SessionLifecycleDependencies {
   pluginConfig: ClawVaultPluginConfig;
@@ -73,13 +74,13 @@ async function runWeeklyReflectionIfNeeded(
     return;
   }
 
-  const result = runClawvault(["reflect", "-v", vaultPath], deps.pluginConfig, {
-    timeoutMs: 120_000
-  });
-  if (result.success) {
+  try {
+    const result = await runReflection({ vaultPath });
+    if (result.writtenWeeks > 0) {
+      deps.logger?.info("[clawvault] Weekly reflection complete");
+    }
     deps.runtimeState.markWeeklyReflectionRun(weekKey);
-    deps.logger?.info("[clawvault] Weekly reflection complete");
-  } else if (!result.skipped) {
+  } catch {
     deps.logger?.warn("[clawvault] Weekly reflection failed");
   }
 }
@@ -100,22 +101,18 @@ export async function handleGatewayStart(
     return;
   }
 
-  const result = runClawvault(["recover", "--clear", "-v", vaultPath], deps.pluginConfig, {
-    timeoutMs: 20_000
-  });
-  if (result.skipped) {
-    return;
-  }
-
-  if (!result.success) {
+  let recoveryInfo: Awaited<ReturnType<typeof recoverContext>>;
+  try {
+    recoveryInfo = await recoverContext(vaultPath, { clearFlag: true });
+  } catch {
     deps.logger?.warn("[clawvault] Startup recovery command failed");
     return;
   }
 
-  const parsed = parseRecoveryOutput(result.output);
-  if (parsed.hadDeath) {
-    const message = parsed.workingOn
-      ? `[ClawVault] Context death detected. Last working on: ${parsed.workingOn}. Run \`clawvault wake\` for full recovery context.`
+  if (recoveryInfo.died) {
+    const workingOn = recoveryInfo.checkpoint?.workingOn?.trim();
+    const message = workingOn
+      ? `[ClawVault] Context death detected. Last working on: ${workingOn}. Run \`clawvault wake\` for full recovery context.`
       : "[ClawVault] Context death detected. Run `clawvault wake` for full recovery context.";
     deps.runtimeState.setStartupRecoveryNotice(message);
     deps.logger?.warn("[clawvault] Context death detected at startup");
@@ -181,16 +178,14 @@ export async function handleBeforeReset(
   if (autoCheckpointEnabled) {
     const safeSessionKey = sanitizeForCheckpoint(sessionKey, 120);
     const safeReason = sanitizeForCheckpoint(event.reason ?? "before_reset", 80);
-    const checkpointResult = runClawvault([
-      "checkpoint",
-      "--working-on",
-      `Session reset via ${safeReason}`,
-      "--focus",
-      `Pre-reset checkpoint, session: ${safeSessionKey}`,
-      "-v",
-      vaultPath
-    ], deps.pluginConfig, { timeoutMs: 30_000 });
-    if (!checkpointResult.success && !checkpointResult.skipped) {
+    try {
+      await saveCheckpoint({
+        workingOn: `Session reset via ${safeReason}`,
+        focus: `Pre-reset checkpoint, session: ${safeSessionKey}`,
+        vaultPath
+      });
+      await flushCheckpoint();
+    } catch {
       deps.logger?.warn("[clawvault] Auto-checkpoint before reset failed");
     }
   }

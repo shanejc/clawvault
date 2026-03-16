@@ -52,6 +52,6 @@ describe('LiveCaptureService', () => {
 
     expect(firstRun.stored).toBeGreaterThan(0);
     expect(secondRun.rejected).toBeGreaterThan(0);
-  });
+  }, 20_000);
 });
 

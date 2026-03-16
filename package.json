@@ -1,6 +1,6 @@
 {
   "name": "clawvault",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "Structured memory system for AI agents — typed storage, knowledge graph, context profiles, canvas dashboards, neural graph themes, and Obsidian-native task views. An elephant never forgets. 🐘",
   "type": "module",
   "main": "dist/index.cjs",
@@ -21,16 +21,12 @@
     "bin",
     "dashboard",
     "templates",
-    "hooks",
     "openclaw.plugin.json"
   ],
   "openclaw": {
     "plugin": "./openclaw.plugin.json",
     "extensions": [
       "./dist/openclaw-plugin.js"
-    ],
-    "hooks": [
-      "./hooks/clawvault"
     ]
   },
   "scripts": {

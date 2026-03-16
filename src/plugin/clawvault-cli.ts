@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -367,13 +367,45 @@ export function runObserverCron(
   pluginConfig: ClawVaultPluginConfig,
   options: { minNewBytes?: number; reason?: string } = {}
 ): boolean {
+  if (!isOptInEnabled(pluginConfig, "allowClawvaultExec")) {
+    return false;
+  }
+
+  const executablePath = resolveExecutablePath(CLAWVAULT_EXECUTABLE, {
+    explicitPath: getConfiguredExecutablePath(pluginConfig)
+  });
+  if (!executablePath) {
+    return false;
+  }
+
+  const expectedSha256 = getConfiguredExecutableSha256(pluginConfig);
+  const integrityResult = verifyExecutableIntegrity(executablePath, expectedSha256);
+  if (!integrityResult.ok) {
+    return false;
+  }
+
   const args = ["observe", "--cron", "--agent", agentId, "-v", vaultPath];
   if (Number.isFinite(options.minNewBytes) && Number(options.minNewBytes) > 0) {
     args.push("--min-new", String(Math.floor(Number(options.minNewBytes))));
   }
 
-  const result = runClawvault(args, pluginConfig, { timeoutMs: 120_000 });
-  return !result.skipped && result.success;
+  let sanitizedArgs: string[];
+  try {
+    sanitizedArgs = sanitizeExecArgs(args);
+  } catch {
+    return false;
+  }
+
+  try {
+    const child = spawn(executablePath, sanitizedArgs, {
+      stdio: "ignore",
+      shell: false
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function resolveSessionKey(input: unknown): string {

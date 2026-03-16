@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.5.0] — 2026-03-16
+
+### Changed
+- Refactored OpenClaw plugin context injection to use in-process `ClawVault.find()` and `buildSessionRecap()` calls (no CLI shelling in pre-prompt recall path), eliminating SQLite lock contention from subprocess access.
+- Migrated plugin session lifecycle recovery/checkpoint flows to direct library calls (`recover` / `checkpoint`) while keeping observer execution on CLI with non-blocking `spawn`.
+- Completed plugin-first repository cleanup by removing legacy `hooks/clawvault/` artifacts and dead `packages/plugin/` scripts package.
+
+### Packaging
+- Published package metadata now targets plugin-first distribution for OpenClaw extensions.
+- Added `.npmignore` exclusions for development-only directories (`autoresearch/`, `eval/`, `benchmarks/`, `hooks/`, `testdata/`, `tests/`, `src/`, `examples/`).
+
+---
+
 ## [3.3.0] — 2026-03-11
 
 ### Added
