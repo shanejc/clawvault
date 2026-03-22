@@ -24,9 +24,9 @@ function isOpenClawPluginApi(value: unknown): value is OpenClawPluginApi {
     && typeof record.logger === "object";
 }
 
-async function registerOpenClawPlugin(api: OpenClawPluginApi): Promise<{
+function registerOpenClawPlugin(api: OpenClawPluginApi): {
   plugins: { slots: { memory: ClawVaultMemoryManager } };
-}> {
+} {
   const pluginConfig = readPluginConfig(api);
   const runtimeState = new ClawVaultPluginRuntimeState();
   const memoryManager = new ClawVaultMemoryManager({
@@ -111,7 +111,7 @@ const clawvaultPlugin = {
   name: "ClawVault",
   kind: "memory" as const,
   description: "Structured memory system for AI agents with proactive recall and protocol-safe messaging",
-  async register(apiOrRuntime?: unknown) {
+  register(apiOrRuntime?: unknown) {
     if (isOpenClawPluginApi(apiOrRuntime)) {
       return registerOpenClawPlugin(apiOrRuntime);
     }
