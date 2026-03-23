@@ -1,337 +1,154 @@
-# ClawVault OpenClaw Plugin Architecture
+# Plugin Architecture
 
 ## Purpose
 
-This document defines the target architecture for the ClawVault OpenClaw plugin.
+This document defines the intended architecture for the ClawVault plugin as a three-layer system:
 
-The plugin should evolve into a **thin-by-default memory substrate** for OpenClaw agents:
+1. **Core memory substrate**
+2. **Optional automation packs**
+3. **Onboarding/config UX**
 
-- local-first by default
-- narrow and auditable
-- capable of reading and writing the memory system intentionally
-- supportive of AGENTS/OpenClaw orchestration rather than competitive with it
-
-It exists to serve the memory model defined at the project root, not to replace that model with a second policy engine.
+The goal is to keep the plugin useful in a minimal, agent-driven mode while preserving a compatibility path for users who want legacy automation behavior.
 
 ---
 
-## Current Branch Baseline
+## Design goals
 
-This architecture is a refactor plan for the plugin as it exists on this branch today, not a greenfield design.
+### 1) Stable substrate first
 
-Current implementation characteristics to preserve or account for:
+The plugin must always provide a reliable memory substrate that works even when every automation feature is disabled.
 
-- synchronous OpenClaw plugin registration
-- existing OpenClaw tools for retrieval (`memory_search`, `memory_get`)
-- legacy slot compatibility for non-OpenClaw runtimes
-- current hook-based lifecycle integration
-- existing lower-level capabilities already present under the surface, such as slot `search`, `recall`, `capture`, and `store`
-- existing configuration flags and defaults, even where those defaults will change
+### 2) Local-first by default
 
-This document should therefore be read as:
+The default experience should read from and write to a local ClawVault vault under user control. The plugin should not require hosted services, prompt relays, or cloud policy engines in order to function.
 
-1. a description of the desired target architecture
-2. a map of what stays
-3. a map of what moves behind feature packs
-4. a delta from the current branch behavior to the target behavior
+### 3) Agent policy stays outside the substrate
 
----
+Behavioral rules for AGENTS/OpenClaw agents should not be hard-coded into the base substrate. The substrate exposes memory capabilities; agent policy decides how and when to use them.
 
-## Hard Rule
+### 4) No hidden autonomy in the base layer
+
+Autonomous observation, checkpointing, reflection, fact extraction, or message rewriting must not be part of the mandatory core. Those belong in optional automation packs.
+
+### 5) Legacy compatibility without legacy defaults
+
+Existing users who depend on automatic hooks and policy-like behaviors must still be able to enable them. However, those behaviors should be grouped behind explicit opt-in configuration or onboarding presets.
+
+### 6) Hard rule
 
 **The plugin may automate memory operations, but it must not own memory policy.**
 
-Meaning:
-
-- the plugin may expose tools, storage primitives, lifecycle signals, and optional automation
-- `AGENTS.md` and OpenClaw agent prompts remain the owners of recall/writeback policy
-- the plugin must not become a second constitution that overrides the memory model through hidden prompt logic or broad automatic behavior
+The plugin may expose tools, storage primitives, lifecycle signals, and optional automation, but `AGENTS.md` and OpenClaw agent prompts remain the owners of recall/writeback policy.
 
 ---
 
-## Architectural Goals
+## Layer 1: Core memory substrate
 
-1. Preserve the three-layer memory model:
-   - `MEMORY.md` = boot / reflex memory
-   - vault notes = durable long-term memory
-   - raw/source files = chronology and evidence
-2. Make the plugin useful in a thin, agent-driven mode first.
-3. Keep current built-in automation available where practical, but disable it by default.
-4. Support an onboarding/setup flow that helps the user choose which optional behaviors to enable.
-5. Keep durable retrieval and writeback local-first and explicit.
-6. Treat the vault as authoritative for durable knowledge, with `MEMORY.md` as a curated boot cache.
+### Definition
 
----
+The **core memory substrate** is the always-available integration layer between OpenClaw and a local ClawVault vault.
 
-## Non-Goals
+It provides safe, explicit memory primitives and vault discovery, but it does **not** impose autonomous behavior on the agent.
 
-The default plugin should not:
+### Required properties
 
-- act like a transcript dump pipeline
-- own the whole behavioral runtime of the agent
-- silently rewrite broad communication policy into every prompt
-- depend on cloud services by default
-- force users into legacy hook-heavy behavior
+- **Always available** once the plugin is installed.
+- **Local-first** and centered on a user-controlled local vault.
+- **No prompt rewriting** as a default capability.
+- **No autonomous policy** or hidden background decision-making.
+- **Explicit invocation model**: the agent or host asks for memory operations directly.
 
-Legacy/compat behavior may continue to exist as an opt-in feature pack, but it is not the design center.
+### What belongs in the substrate
 
----
+#### Vault resolution and configuration plumbing
 
-## Operating Modes / Presets
+The substrate owns:
 
-The plugin should support preset-based operation instead of exposing only a bag of unrelated booleans.
+- locating the active vault for the current agent/session/workspace
+- validating configured vault paths
+- resolving per-agent vault mappings
+- enforcing safe access to local configuration and executable settings
 
-### 1. Thin / Agent-Driven (default)
+This is the foundational connectivity layer between the plugin runtime and the vault.
 
-Enabled by default:
+#### Explicit memory read primitives
 
-- vault discovery / routing
-- retrieval tools
-- writeback tools
-- category registry
-- provenance-aware reads/writes
-- minimal lifecycle signals if needed
+The substrate should expose direct memory capabilities such as:
 
-Disabled by default:
+- searching the vault
+- retrieving specific memory documents
+- listing relevant context for a user-supplied query
+- loading recent session recap information when explicitly requested
 
-- prompt rewriting
-- communication-style enforcement
-- broad automatic maintenance behavior
-- autonomous reflection / observation / checkpoint orchestration
+These are capabilities, not policies. The substrate returns memory data; it does not decide when the agent must consult memory.
 
-### 2. Hybrid
+#### Explicit memory write primitives
 
-A middle path for users who want some assistance without the full legacy behavior.
+The substrate may expose direct write operations such as:
 
-May include:
+- storing notes or memories
+- writing durable vault entries when explicitly requested
+- writing `MEMORY.md` using section-aware direct update rules
+- capturing source chronology/evidence when explicitly requested
+- creating checkpoints when explicitly invoked
 
-- optional context injection
-- optional recovery notices
-- optional maintenance assists
-- optional boot-memory refresh helpers
+Again, the key constraint is explicitness. A write should happen because the caller requested it, not because the substrate inferred a policy trigger.
 
-### 3. Legacy Automation
+#### Safety and integrity boundaries
 
-Compatibility mode for users who want the pre-refactor behavior.
+The substrate should also own cross-cutting concerns required for safe operation:
 
-May include:
+- executable path verification and integrity checks
+- argument sanitization
+- session/agent identifier sanitization
+- bounded output formatting for injected or returned context
+- safe path/category resolution for local note reads and writes
 
-- recall mandates injected into prompts
-- message-sending filtering / rewrites
-- broader lifecycle-triggered automation
-- old defaults preserved as a feature pack
+These are infrastructure responsibilities, not automation behaviors.
 
-This mode should remain available only if it can be isolated cleanly from the core substrate.
+### Required tool surface
 
----
-
-## Core Module Boundaries
-
-The refactor should separate the plugin into explicit layers.
-
-### A. Core Memory Substrate
-
-Responsibilities:
-
-- resolve the correct vault for an agent/session
-- expose retrieval and writeback tools
-- enforce safe path/category rules
-- attach provenance and citations
-- provide layer-aware memory metadata
-
-This layer is the architectural center.
-
-### B. Boot Memory Subsystem
-
-Responsibilities:
-
-- read and update `MEMORY.md`
-- enforce section-aware writes
-- keep boot memory concise and curated
-- support refresh-from-vault style workflows
-
-### C. Optional Feature Packs
-
-Responsibilities:
-
-- provide opt-in automation
-- group related legacy behavior coherently
-- remain detachable from the core substrate
-
-Suggested packs:
-
-- recall/context pack
-- maintenance pack
-- legacy protocol pack
-
-### D. Onboarding / Config UX
-
-Responsibilities:
-
-- let users choose presets
-- configure vault routing
-- configure categories
-- configure boot-memory behavior
-- make optional automation discoverable without making it the default
-
----
-
-## Memory Layer Contract
-
-The plugin must model the memory system as explicit layers.
-
-### Boot Layer
-
-**Location:** `MEMORY.md`
-
-Use for:
-
-- identity
-- stable preferences
-- must-know operating assumptions
-- active frontier context required on boot
-
-Constraints:
-
-- lean
-- curated
-- summary-oriented
-- not a history dump
-
-### Durable Layer
-
-**Location:** structured vault notes
-
-Includes native folders such as:
-
-- `people/`
-- `projects/`
-- `decisions/`
-- `lessons/`
-- `tasks/`
-- `backlog/`
-- `handoffs/`
-
-And additive overlay/custom folders such as:
-
-- `systems/`
-- `meetings/`
-- `sources/`
-- `imports/`
-- `reports/`
-- onboarding-configured custom categories
-
-Constraints:
-
-- structured
-- durable
-- source-aware
-- reviewable
-- authoritative for long-term memory
-
-### Source Layer
-
-Examples:
-
-- `memory/YYYY-MM-DD.md`
-- `memory/chat-*.md`
-- imported transcripts
-- raw chronology/evidence captures
-
-Constraints:
-
-- available for later distillation
-- not the primary durable memory layer
-- not the primary recall layer by default
-
-### Retrieval Requirement
-
-The plugin must treat durable vault notes as first-class retrievable memory.
-
-That means:
-
-- search results must distinguish `boot`, `vault`, and `source` layers
-- read APIs must support durable vault notes, not only `MEMORY.md` or source files
-- citations/provenance must remain available across all layers
-
----
-
-## Tool Surface
-
-The plugin should expose the full memory workflow as tools, not just search.
-
-### Retrieval Tools
+The default substrate should expose an explicit memory tool surface, including:
 
 - `memory_search`
 - `memory_get`
 - `memory_categories`
-
-### Writeback Tools
-
 - `memory_classify`
 - `memory_write_vault`
 - `memory_write_boot`
 - `memory_capture_source`
-- `memory_update` / `memory_patch` (if needed for note mutation workflows)
 
-### Tool Intent
+Tool naming can change during implementation, but the architecture should preserve the distinction between:
 
-#### `memory_classify`
+- search/read
+- classification
+- durable writeback
+- boot-memory updates
+- source capture
 
-Input:
+### Memory layer contract
 
-- distilled candidate memory
-- optional source/provenance metadata
+The substrate should model the memory system as explicit layers:
 
-Output:
+- **Boot** → `MEMORY.md`
+- **Durable** → structured vault notes
+- **Source** → chronology/evidence/raw captures
 
-- layer suggestion: `boot`, `vault`, `source`, or `discard`
-- category suggestion for durable writes
-- rationale / confidence metadata where helpful
+Retrieval and writeback should remain layer-aware. Durable vault notes must be first-class retrievable memory, not treated as second-class compared with `MEMORY.md` or raw source files.
 
-#### `memory_write_vault`
+### `MEMORY.md` contract
 
-Writes durable memory into the correct vault category.
-
-Requirements:
-
-- provenance-aware
-- category-aware
-- safe and deterministic
-
-#### `memory_write_boot`
-
-Writes to `MEMORY.md` using section-aware direct update rules.
+`MEMORY.md` should be treated as a special managed surface rather than a generic note.
 
 Requirements:
 
-- no blind append
-- no full-file overwrite unless explicitly requested
+- section-aware direct update
+- no blind append by default
 - preserve unrelated sections
-- maintain concise boot memory
+- keep boot memory concise and curated
+- redirect detailed durable material into the vault instead of bloating boot memory
 
-#### `memory_capture_source`
-
-Stores chronology/evidence without promoting it into durable memory by default.
-
-#### `memory_categories`
-
-Returns:
-
-- protected native categories
-- additive overlay categories
-- onboarding-configured custom categories
-- the layer/category mapping rules the plugin is using
-
----
-
-## `MEMORY.md` Contract
-
-The plugin should treat `MEMORY.md` as a special managed surface, not as an ordinary note file.
-
-### Default Sections
-
-A reasonable default shape is:
+Reasonable default sections include:
 
 - `Identity`
 - `Key Decisions`
@@ -339,45 +156,13 @@ A reasonable default shape is:
 - `Constraints / Preferences`
 - `Quick Links`
 
-This should remain configurable, but the plugin should ship with a clear default schema.
+The vault remains authoritative for durable memory. `MEMORY.md` is the executive summary / boot cache.
 
-### Write Semantics
+### Category model
 
-The desired contract is **section-aware direct update**.
+The substrate should preserve native ClawVault categories while allowing additive customization.
 
-That means:
-
-- writes target a named section
-- entries are merged or replaced deterministically
-- duplicates are removed where practical
-- unrelated sections are preserved
-- large or obviously durable details should be redirected into the vault instead of being stuffed into boot memory
-
-### Authority Rule
-
-- the vault is authoritative for durable memory
-- `MEMORY.md` is an executive summary / boot cache
-- `MEMORY.md` should reference the vault rather than duplicate the vault in detail
-
-### Boot-Memory Refresh Helpers
-
-The plugin may optionally support:
-
-- refresh suggestions based on vault state
-- periodic boot-memory cleanup helpers
-- generated summaries that can be applied section-by-section
-
-These helpers must still respect the concise boot-memory contract.
-
----
-
-## Category Model
-
-The plugin should support both stability and extensibility.
-
-### Protected Native Categories
-
-These categories are semantically important and should not be casually repurposed:
+Protected native categories include things like:
 
 - `people`
 - `projects`
@@ -386,11 +171,8 @@ These categories are semantically important and should not be casually repurpose
 - `tasks`
 - `backlog`
 - `handoffs`
-- and any other ClawVault-native operational folders proven to be first-class
 
-### Additive Overlay / Custom Categories
-
-Users should be able to add categories without fighting the plugin, such as:
+Additive overlay/custom categories may include things like:
 
 - `systems`
 - `meetings`
@@ -399,147 +181,391 @@ Users should be able to add categories without fighting the plugin, such as:
 - `reports`
 - onboarding-defined custom categories
 
-### Rule
+Rule: **overlay, don’t overthrow**.
 
-Overlay, don’t overthrow.
+### What does **not** belong in the substrate
 
-The plugin should preserve native operational meaning while allowing additive customization.
+The substrate must not, by default:
 
----
+- rewrite prompts
+- rewrite outbound messages
+- automatically checkpoint sessions
+- automatically observe conversations
+- automatically extract facts
+- automatically run reflections
+- automatically recover and inject prior state
+- enforce communication etiquette or behavioral policy
 
-## Optional Feature Packs
+Those behaviors are useful, but they are not part of the minimal memory substrate.
 
-Feature packs should make existing automation preservable without forcing it on everyone.
+### Substrate mental model
 
-### Recall / Context Pack
+A helpful test is:
 
-May include:
+> If an agent author wants a completely agent-driven workflow where the model decides when to read or write memory, the substrate should still be fully usable without enabling any automation hooks.
 
-- before-prompt recall hints
-- session context injection
-- recovery notices
-
-### Maintenance Pack
-
-May include:
-
-- startup recovery
-- auto-checkpoint
-- observation triggers
-- reflection scheduling
-- fact extraction helpers
-
-### Legacy Protocol Pack
-
-May include:
-
-- communication-protocol appendices
-- message rewriting / filtering
-- other pre-refactor prompt-governance behavior
-
-### Pack Rule
-
-Feature packs:
-
-- must be explicit
-- must be disableable
-- must not be required for the thin default mode
-- must not blur the boundary between substrate and policy
+That is the baseline architecture target.
 
 ---
 
-## Onboarding / Setup Flow
+## Layer 2: Optional automation packs
 
-The plugin should eventually offer a setup flow that asks the user to choose:
+### Definition
 
-1. operating mode / preset
-2. single-vault or per-agent routing
-3. boot-memory handling style
-4. native-only vs additive categories
-5. which optional feature packs to enable
+**Optional automation packs** are named bundles of higher-level plugin behaviors built on top of the substrate.
 
-The output of onboarding should be concrete plugin config, not just advice.
+They preserve legacy-compatible workflows, but are disabled by default unless the user explicitly chooses them.
+
+### Required properties
+
+- **Legacy-compatible** with the current hook-driven plugin behavior.
+- **Disabled by default** in a fresh minimal install.
+- **Explicitly enabled** via config, onboarding, or preset selection.
+- Built entirely **on top of** the core substrate.
+
+### Why automation packs exist
+
+The current plugin includes several behaviors that are valuable for users who want a more managed memory system:
+
+- automatic context injection
+- startup recovery notices
+- auto-checkpointing
+- observer triggers
+- fact extraction
+- weekly reflection
+- communication protocol appendices
+- outbound message rewriting and filtering
+
+These should remain available, but as opt-in packs rather than mandatory substrate behavior.
+
+### Pack structure
+
+Automation packs should be organized around coherent user intent rather than isolated booleans only.
+
+Recommended conceptual packs:
+
+#### A. Session memory pack
+
+Focus: automatically bringing relevant memory into a session.
+
+Includes behaviors such as:
+
+- session-start recap loading
+- startup recovery notice generation
+- before-prompt context injection
+- recall reminders or helper instructions
+
+This pack improves continuity, but it is still automation because it changes the runtime context without requiring explicit per-turn user requests.
+
+#### B. Capture and observation pack
+
+Focus: automatically converting agent activity into stored memory.
+
+Includes behaviors such as:
+
+- observe-on-new / observe-on-reset
+- heartbeat observation
+- compaction-time observation
+- automatic fact extraction during lifecycle hooks
+- auto-checkpointing before reset or similar lifecycle transitions
+
+This pack adds memory capture automation and should remain opt-in.
+
+#### C. Reflection and maintenance pack
+
+Focus: periodic higher-order memory processing.
+
+Includes behaviors such as:
+
+- weekly reflection runs
+- scheduled summarization or promotion workflows
+- future maintenance jobs built on the same substrate
+
+These are clearly beyond the substrate because they embody autonomous processing policies.
+
+#### D. Legacy communication policy pack
+
+Focus: preserving older policy-shaped plugin behavior for teams that want it.
+
+Includes behaviors such as:
+
+- communication protocol appendix injection
+- message sending filters
+- outbound message rewriting
+- question rewriting with memory evidence
+- canceling outbound messages that fail pack rules
+
+This pack is the clearest example of behavior that should **not** be in the base layer, because it approaches agent policy enforcement.
+
+### Relationship to legacy config flags
+
+The existing fine-grained flags can remain for backward compatibility, but the architecture should treat them as implementation details underneath pack-level controls.
+
+That means:
+
+- old configs continue to work
+- pack presets can expand into the equivalent flag set
+- documentation should describe packs first, raw booleans second
+
+In other words, packs are the user-facing architecture; booleans are the low-level compatibility layer.
 
 ---
 
-## Documentation Reference Position
+## Layer 3: Onboarding/config UX
 
-`docs/openclaw-plugin-usage.md` should be treated as a useful behavioral reference for the target model, especially for:
+### Definition
 
-- `MEMORY.md` vs vault framing
-- vault-authoritative / boot-cache distinction
-- hybrid operation concepts
-- keeping `MEMORY.md` lean
+The **onboarding/config UX** is the layer that helps users choose how much automation they want.
 
-However, stale installation and hook-pack assumptions in older docs should not be treated as normative architecture.
+It must make the layer split understandable on first run, rather than dropping users into a large undifferentiated set of booleans.
+
+### Required properties
+
+- **First-run feature selection**
+- clear explanation of substrate vs automation
+- reversible choices
+- presets for common usage patterns
+
+### First-run experience
+
+On first run, the plugin should explain:
+
+1. the plugin can operate as a thin local memory substrate
+2. automation is optional
+3. legacy-style behavior is available as an opt-in preset
+
+The setup flow should then ask the user which operating mode they want.
+
+### Presets
+
+#### Thin / Agent-driven
+
+Recommended for users who want the memory system but do not want the plugin to steer agent behavior.
+
+Enables:
+
+- vault selection / local vault setup
+- explicit memory tools and substrate connectivity
+
+Disables:
+
+- automatic context injection
+- automatic checkpointing
+- automated observation
+- reflection jobs
+- message rewriting
+- communication-policy appendices
+
+This should be the cleanest representation of the architecture's default philosophy.
+
+#### Hybrid
+
+Recommended for users who want memory assistance without full legacy automation.
+
+Enables a curated subset such as:
+
+- session recap/context injection
+- startup recovery notice
+- optional gentle recall assistance
+
+Keeps disabled unless separately chosen:
+
+- aggressive observation hooks
+- automated checkpointing
+- outbound message rewriting/filtering
+- full legacy communication policy enforcement
+
+This preset gives practical convenience while still avoiding strong policy coupling.
+
+#### Legacy automation
+
+Recommended for users migrating from the current plugin behavior or wanting the previous managed experience.
+
+Enables most or all legacy-compatible packs, including:
+
+- session memory automation
+- capture/observation automation
+- reflection/maintenance automation
+- communication-policy automation
+
+This preset should be presented as compatible and familiar, but explicitly not the default.
+
+### UX principles
+
+The configuration UX should:
+
+- describe behavior in plain language, not only internal flag names
+- show which layer each feature belongs to
+- allow pack-level toggles plus advanced per-feature overrides
+- make it obvious when a behavior can rewrite prompts or messages
+- make it obvious when a behavior acts autonomously in the background
 
 ---
 
-## Refactor Delta From Current Implementation
+## Ownership boundaries: what belongs where
 
-The current branch already contains useful building blocks. The job is to refactor them into the target architecture rather than discard them blindly.
+This section defines the architectural boundary between:
 
-### Keep
+- **AGENTS/OpenClaw agent policy**
+- **the plugin substrate**
+- **optional automation packs**
 
-- synchronous registration and runtime compatibility behavior
-- existing retrieval entry points where they fit the model
-- existing slot-level memory capabilities that can be promoted into first-class tools
-- vault routing and agent/session-aware resolution logic
+### A. AGENTS/OpenClaw agent policy
 
-### Rework
+These behaviors belong to agent policy, not to the substrate:
 
-- retrieval metadata so durable vault notes are first-class and layer-aware
-- `memory_get` scope so it can read durable vault notes safely, not only `MEMORY.md` and source files
-- current defaults so thin / agent-driven mode becomes the default preset
-- docs and compatibility checks that still assume the older hook-pack layout
+- deciding when memory should be consulted
+- deciding whether a memory hit is sufficient to trust
+- deciding whether to ask follow-up questions
+- deciding whether to checkpoint or store a memory as part of task strategy
+- deciding how to communicate with users or other agents
+- deciding whether to obey organizational communication rules
+- deciding whether to prefer memory evidence before answering historical questions
 
-### Move Behind Optional Packs
+In short: **reasoning and behavior policy belong to the agent**.
 
-- prompt recall mandates
-- communication-style / protocol rewriting
-- broad lifecycle-triggered maintenance automation
-- reflection / observation / checkpoint conveniences that are helpful but not core substrate behavior
+Examples:
 
-### Add
+- “Before answering historical questions, search memory first” is an **agent policy**.
+- “When collaborating with another agent, include citations from memory” is an **agent policy**.
+- “Do not send unanswered questions unless memory has been checked” is an **agent policy**.
 
-- explicit writeback tools
-- structured `MEMORY.md` section-aware update support
-- category registry / custom category support
-- onboarding/preset setup flow
-- a clearer distinction between substrate behavior and agent policy
+The plugin may support these policies, but it should not silently define them in its mandatory base layer.
 
-This section exists to keep implementation work grounded in the code that is already here on the branch.
+### B. Plugin substrate
+
+These behaviors belong to the substrate:
+
+- exposing memory search/read/write primitives
+- resolving the local vault and session identity
+- formatting returned memory context safely
+- providing local-first access to stored markdown memories
+- enforcing technical safety/integrity checks for plugin execution
+- exposing optional hooks or APIs that higher layers can build on
+
+In short: **capabilities and safe infrastructure belong to the substrate**.
+
+Examples:
+
+- `memory_search` returns ranked vault matches.
+- `memory_get` retrieves a specific note.
+- explicit `checkpoint` writes session state when requested.
+- vault path detection finds the correct local vault for an agent.
+- `memory_write_boot` updates `MEMORY.md` section-by-section when explicitly requested.
+
+### C. Optional automation packs
+
+These behaviors belong to automation packs:
+
+- injecting session recap into prompts automatically
+- injecting relevant vault context before prompt build
+- creating startup recovery notices automatically
+- auto-checkpointing on lifecycle events
+- observing active sessions without explicit requests
+- running fact extraction opportunistically on hooks
+- running weekly reflection jobs
+- appending communication protocol instructions
+- rewriting outbound messages
+- canceling or filtering messages based on memory/policy checks
+
+In short: **automation, orchestration, and legacy convenience behavior belong to packs**.
 
 ---
 
-## Migration Strategy
+## Behavior classification table
 
-The refactor should be staged.
-
-1. Define the architecture and module boundaries.
-2. Make retrieval layer-aware.
-3. Expose the writeback tool surface.
-4. Add structured `MEMORY.md` support.
-5. Add additive category support.
-6. Move current behavior behind feature packs / presets.
-7. Add onboarding/setup.
-8. Realign docs and compatibility checks.
-
-Where practical:
-
-- preserve existing behavior behind compatibility mode
-- flip the default to thin / agent-driven
-- avoid a hard fork unless the current codebase proves impossible to modularize cleanly
+| Behavior | AGENTS / OpenClaw policy | Plugin substrate | Optional automation packs |
+| --- | --- | --- | --- |
+| Decide whether memory should be consulted | Yes | No | No |
+| Search local vault on explicit request | No | Yes | Can call into substrate |
+| Retrieve a specific memory document | No | Yes | Can call into substrate |
+| Resolve active vault path | No | Yes | Can depend on it |
+| Validate executable path / integrity | No | Yes | Can depend on it |
+| Classify whether information belongs in boot, vault, source, or discard | Agent decides, substrate may expose helper tools | Helper support only | Can automate if explicitly enabled |
+| Write durable vault memory on explicit request | No | Yes | Can call into substrate |
+| Update `MEMORY.md` section-by-section on explicit request | No | Yes | Can call into substrate |
+| Inject session recap automatically | No | No | Yes |
+| Inject memory context automatically before prompt build | No | No | Yes |
+| Add recall mandate text to prompts | Usually yes as policy, if automated then via pack | No | Yes when plugin performs it automatically |
+| Auto-checkpoint on reset/new session events | No | No | Yes |
+| Observe heartbeat / compaction / reset events | No | No | Yes |
+| Run fact extraction during lifecycle hooks | No | No | Yes |
+| Run weekly reflection jobs | No | No | Yes |
+| Enforce communication protocol appendix | Yes in principle | No | Yes if plugin injects it |
+| Rewrite outbound messages | Yes in principle | No | Yes if plugin performs rewriting |
+| Cancel outbound messages that violate policy | Yes in principle | No | Yes if plugin enforces it |
 
 ---
 
-## Success Criteria
+## Mapping of current plugin behaviors into the new architecture
 
-The architecture is succeeding if:
+The existing codebase already contains the raw pieces needed for this split.
 
-- the plugin is useful in thin mode
-- durable vault notes are first-class memory in retrieval and writeback
-- `MEMORY.md` becomes easier to keep curated
-- optional automation remains available without becoming mandatory
-- the plugin feels like a substrate and adapter, not a second hidden policy engine
-- OpenClaw agents remain the preferred place for higher-level reflection and maintenance decisions
+### Substrate-aligned pieces
+
+These components fit naturally in the core layer:
+
+- config parsing and vault-path resolution
+- session key and agent ID sanitization
+- executable integrity verification
+- vault search and recap retrieval helpers
+- explicit CLI or library-backed memory access
+
+### Automation-pack-aligned pieces
+
+These components should be documented and surfaced as optional packs:
+
+- `before_prompt_build` context injection behavior
+- startup recovery notice handling
+- session recap preloading
+- `before_reset` auto-checkpointing
+- observer cron triggers on lifecycle hooks
+- fact extraction on lifecycle hooks
+- weekly reflection scheduling
+- communication protocol appendix injection
+- message sending rewrite/filter behavior
+
+### Onboarding/config-aligned pieces
+
+These are the controls that should evolve into preset-driven UX:
+
+- booleans that enable or disable automated hook behavior
+- context profile selection
+- preset expansion into per-feature flags
+- migration path for older configs
+
+---
+
+## Default policy recommendation
+
+The recommended default for a new installation is:
+
+- install and enable the **core memory substrate**
+- default to the **Thin / Agent-driven** preset
+- offer **Hybrid** and **Legacy automation** during onboarding
+- preserve backward compatibility for explicit legacy configs
+
+This default keeps ClawVault aligned with a minimal local-first memory philosophy while still supporting users who want more automation.
+
+---
+
+## Non-goals
+
+This architecture intentionally does **not** make the plugin responsible for:
+
+- defining the full reasoning policy of AGENTS/OpenClaw agents
+- forcing a single collaboration style
+- requiring prompt injection as the primary integration mechanism
+- making autonomous memory operations unavoidable
+
+---
+
+## Summary
+
+The plugin should be understood as a layered system:
+
+- **Core memory substrate**: always available, local-first, explicit, non-autonomous
+- **Optional automation packs**: legacy-compatible, opt-in orchestration and policy-like behaviors
+- **Onboarding/config UX**: first-run selection and presets that clearly expose the tradeoff between minimalism and automation
+
+This split keeps the base plugin small and principled while preserving the richer automation workflows that some users still want.
