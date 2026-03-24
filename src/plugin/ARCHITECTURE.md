@@ -26,6 +26,8 @@ The default experience should read from and write to a local ClawVault vault und
 
 Behavioral rules for AGENTS/OpenClaw agents should not be hard-coded into the base substrate. The substrate exposes memory capabilities; agent policy decides how and when to use them.
 
+**Hard rule:** “The plugin may automate memory operations, but it must not own memory policy.”
+
 ### 4) No hidden autonomy in the base layer
 
 Autonomous observation, checkpointing, reflection, fact extraction, or message rewriting must not be part of the mandatory core. Those belong in optional automation packs.
@@ -65,24 +67,51 @@ This is the foundational connectivity layer between the plugin runtime and the v
 
 #### Explicit memory read primitives
 
-The substrate should expose direct memory capabilities such as:
+The substrate should expose a required memory tool surface:
 
-- searching the vault
-- retrieving specific memory documents
-- listing relevant context for a user-supplied query
-- loading recent session recap information when explicitly requested
+- `memory_search`
+- `memory_get`
+- `memory_categories`
+- `memory_classify`
 
 These are capabilities, not policies. The substrate returns memory data; it does not decide when the agent must consult memory.
 
 #### Explicit memory write primitives
 
-The substrate may expose direct write operations such as:
+The substrate should expose explicit write/capture operations:
 
-- storing notes or memories
-- appending structured observations when requested by the caller
-- creating checkpoints when explicitly invoked
+- `memory_write_vault`
+- `memory_write_boot`
+- `memory_capture_source`
 
 Again, the key constraint is explicitness. A write should happen because the caller requested it, not because the substrate inferred a policy trigger.
+
+#### Memory-layer contract (layer-aware)
+
+The substrate contract is explicitly three-layered:
+
+- **Boot** (`MEMORY.md`)
+- **Durable** (structured vault notes)
+- **Source** (chronology, evidence, and raw captures)
+
+Durable notes are first-class in retrieval and writeback semantics. The substrate must treat durable notes as canonical long-lived memory objects, not as a secondary cache behind boot/source artifacts.
+
+`MEMORY.md` semantics must require:
+
+- section-aware direct updates
+- no blind append by default
+- preserving unrelated sections
+- concise curated boot memory
+
+#### Category model contract
+
+Category handling must support:
+
+- protected native categories
+- additive custom/overlay categories
+- an “overlay, don't overthrow” rule for extension behavior
+
+Custom categories may extend classification and retrieval ergonomics, but they must not silently replace native category semantics required by the substrate.
 
 #### Safety and integrity boundaries
 
@@ -357,6 +386,8 @@ Examples:
 
 - `memory_search` returns ranked vault matches.
 - `memory_get` retrieves a specific note.
+- `memory_categories` and `memory_classify` preserve a stable category surface for retrieval and organization.
+- `memory_write_vault`, `memory_write_boot`, and `memory_capture_source` map writes to the correct memory layer.
 - explicit `checkpoint` writes session state when requested.
 - vault path detection finds the correct local vault for an agent.
 
