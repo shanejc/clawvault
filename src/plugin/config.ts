@@ -32,6 +32,7 @@ export interface ClawVaultPluginConfig {
   enforceCommunicationProtocol?: boolean;
   enableMessageSendingFilter?: boolean;
   minQuestionRecallScore?: number;
+  memoryOverlayFolders?: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

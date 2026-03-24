@@ -31,7 +31,12 @@ describe("communication protocol", () => {
           endLine: 15,
           score: 0.91,
           snippet: "Decision: release cutover should happen in phased waves.",
-          source: "memory",
+          layer: "source",
+          category: "memory",
+          provenance: {
+            source: "clawvault",
+            relPath: "memory/2026-03-10.md"
+          },
           citation: "memory/2026-03-10.md#L12-L15"
         }
       ]

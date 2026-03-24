@@ -488,6 +488,9 @@ vault/
 - `qmd` fallback errors:
   - `qmd` is optional; in-process BM25 search is available without it
   - if you want fallback compatibility, ensure `qmd --version` works in the same shell
+- Dependency install fails in restricted/sandboxed environments (Chromium/ONNX binary downloads):
+  - run `npm run install:restricted`
+  - this skips Puppeteer browser downloads and ONNX runtime binary install hooks so you can still run local build/tests
 - Hook/plugin not active in OpenClaw:
   - run `openclaw hooks install clawvault`
   - run `openclaw hooks enable clawvault`

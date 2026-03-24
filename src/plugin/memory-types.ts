@@ -1,4 +1,10 @@
-export type MemorySource = "memory" | "sessions";
+export type MemoryLayer = "boot" | "vault" | "source";
+
+export type MemoryProvenance = {
+  source: "clawvault";
+  relPath: string;
+  absolutePath?: string;
+};
 
 export type MemorySearchResult = {
   path: string;
@@ -6,7 +12,9 @@ export type MemorySearchResult = {
   endLine: number;
   score: number;
   snippet: string;
-  source: MemorySource;
+  layer: MemoryLayer;
+  category: string;
+  provenance: MemoryProvenance;
   citation?: string;
 };
 
@@ -32,9 +40,9 @@ export type MemoryProviderStatus = {
   workspaceDir?: string;
   dbPath?: string;
   extraPaths?: string[];
-  sources?: MemorySource[];
+  sources?: MemoryLayer[];
   sourceCounts?: Array<{
-    source: MemorySource;
+    source: MemoryLayer;
     files: number;
     chunks: number;
   }>;
@@ -86,6 +94,10 @@ export interface MemorySearchManager {
   }): Promise<{
     text: string;
     path: string;
+    layer?: MemoryLayer;
+    category?: string;
+    provenance?: MemoryProvenance;
+    citation?: string;
   }>;
   status(): MemoryProviderStatus;
   sync?(params?: {
