@@ -11,7 +11,12 @@ function createMemoryManager(results: Array<{ snippet: string; citation?: string
         endLine: 3,
         score: 0.9,
         snippet: result.snippet,
-        source: "memory" as const,
+        layer: "source" as const,
+        category: "memory",
+        provenance: {
+          source: "clawvault" as const,
+          relPath: `memory/test-${index}.md`
+        },
         citation: result.citation
       }));
     },

@@ -13,13 +13,24 @@ import {
 } from "./clawvault-cli.js";
 import type {
   MemoryEmbeddingProbeResult,
+  MemoryLayer,
   MemoryProviderStatus,
+  MemoryProvenance,
   MemorySearchManager,
   MemorySearchResult
 } from "./memory-types.js";
 
 const DEFAULT_MAX_RESULTS = 6;
 const DEFAULT_MIN_SCORE = 0.2;
+const DEFAULT_DURABLE_CATEGORIES = ["people", "projects", "decisions", "lessons", "tasks", "backlog", "handoffs"] as const;
+const DEFAULT_SOURCE_CATEGORIES = ["memory", "source", "sessions", "captures", "evidence", "chronology", "logs"] as const;
+
+type MemoryPathMetadata = {
+  relPath: string;
+  layer: MemoryLayer;
+  category: string;
+  provenance: MemoryProvenance;
+};
 
 export interface ClawVaultMemoryManagerOptions {
   pluginConfig: ClawVaultPluginConfig;
@@ -59,21 +70,39 @@ function estimateLineRange(content: string, snippet: string): { startLine: numbe
   return { startLine, endLine };
 }
 
+function inferLayerAndCategory(relPath: string): { layer: MemoryLayer; category: string } {
+  if (relPath === "MEMORY.md") {
+    return { layer: "boot", category: "boot" };
+  }
+
+  const category = relPath.split("/")[0] ?? "unknown";
+  if ((DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category)) {
+    return { layer: "source", category };
+  }
+
+  return { layer: "vault", category };
+}
+
 function mapSearchResult(vaultPath: string, result: SearchResult): MemorySearchResult {
   const relPath = normalizeRelPath(path.relative(vaultPath, result.document.path));
   const { startLine, endLine } = estimateLineRange(result.document.content, result.snippet);
-  const source = relPath === "MEMORY.md" || relPath.startsWith("memory/")
-    ? "memory"
-    : "sessions";
+  const { layer, category } = inferLayerAndCategory(relPath || path.basename(result.document.path));
+  const normalizedRelPath = relPath || path.basename(result.document.path);
 
   return {
-    path: relPath || path.basename(result.document.path),
+    path: normalizedRelPath,
     startLine,
     endLine,
     score: result.score,
     snippet: result.snippet,
-    source,
-    citation: `${relPath || path.basename(result.document.path)}#L${startLine}-L${endLine}`
+    layer,
+    category,
+    provenance: {
+      source: "clawvault",
+      relPath: normalizedRelPath,
+      absolutePath: result.document.path
+    },
+    citation: `${normalizedRelPath}#L${startLine}-L${endLine}`
   };
 }
 
@@ -107,18 +136,77 @@ function countMarkdownFiles(root: string): number {
   return count;
 }
 
-function toSafeFilePath(vaultPath: string, relPath: string): string {
+function isSafeCategoryName(value: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
+}
+
+function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
+  const folders = new Set<string>();
+  for (const category of DEFAULT_DURABLE_CATEGORIES) {
+    folders.add(category);
+  }
+  for (const category of DEFAULT_SOURCE_CATEGORIES) {
+    folders.add(category);
+  }
+
+  if (Array.isArray((pluginConfig as { memoryOverlayFolders?: unknown }).memoryOverlayFolders)) {
+    const configured = (pluginConfig as { memoryOverlayFolders?: unknown[] }).memoryOverlayFolders ?? [];
+    for (const value of configured) {
+      if (typeof value !== "string") continue;
+      const folder = normalizeRelPath(value).split("/")[0] ?? "";
+      if (isSafeCategoryName(folder)) {
+        folders.add(folder);
+      }
+    }
+  }
+
+  const configPath = path.join(vaultPath, ".clawvault.json");
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      const configuredArrays = [
+        parsed.categories,
+        parsed.overlayCategories,
+        parsed.customCategories,
+        parsed.memoryReadRoots
+      ];
+      for (const candidate of configuredArrays) {
+        if (!Array.isArray(candidate)) continue;
+        for (const item of candidate) {
+          if (typeof item !== "string") continue;
+          const folder = normalizeRelPath(item).split("/")[0] ?? "";
+          if (isSafeCategoryName(folder)) {
+            folders.add(folder);
+          }
+        }
+      }
+    } catch {
+      // Ignore invalid JSON and keep default safe categories.
+    }
+  }
+
+  return folders;
+}
+
+function toSafeMemoryPath(
+  vaultPath: string,
+  relPath: string,
+  pluginConfig: ClawVaultPluginConfig
+): { absolutePath: string; metadata: MemoryPathMetadata } {
   const normalized = normalizeRelPath(relPath);
   const mapped = normalized.startsWith("qmd/")
     ? normalized.split("/").slice(2).join("/")
     : normalized;
 
-  if (!mapped || mapped.includes("..")) {
+  if (!mapped || mapped.includes("..") || path.isAbsolute(mapped)) {
     throw new Error("Invalid memory path");
   }
 
-  if (mapped !== "MEMORY.md" && !mapped.startsWith("memory/")) {
-    throw new Error("memory_get only allows MEMORY.md or memory/* paths");
+  const safeRoots = getConfiguredCategoryFolders(vaultPath, pluginConfig);
+  const topLevel = mapped.split("/")[0] ?? "";
+  const allowByCategory = topLevel.length > 0 && safeRoots.has(topLevel);
+  if (mapped !== "MEMORY.md" && !allowByCategory) {
+    throw new Error(`memory_get path not allowed: ${mapped}`);
   }
 
   const absolute = path.resolve(vaultPath, mapped);
@@ -127,7 +215,20 @@ function toSafeFilePath(vaultPath: string, relPath: string): string {
     throw new Error("Path escapes vault root");
   }
 
-  return absolute;
+  const { layer, category } = inferLayerAndCategory(mapped);
+  return {
+    absolutePath: absolute,
+    metadata: {
+      relPath: mapped,
+      layer,
+      category,
+      provenance: {
+        source: "clawvault",
+        relPath: mapped,
+        absolutePath: absolute
+      }
+    }
+  };
 }
 
 function resolveManagerVaultPath(
@@ -183,27 +284,47 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
     }
   }
 
-  async readFile(params: { relPath: string; from?: number; lines?: number }): Promise<{ text: string; path: string }> {
+  async readFile(params: { relPath: string; from?: number; lines?: number }): Promise<{
+    text: string;
+    path: string;
+    layer?: MemoryLayer;
+    category?: string;
+    provenance?: MemoryProvenance;
+    citation?: string;
+  }> {
     const vaultPath = resolveManagerVaultPath(this.options);
     const normalizedPath = normalizeRelPath(params.relPath);
     if (!vaultPath) {
       return { text: "", path: normalizedPath };
     }
 
-    let absolutePath: string;
+    let resolvedPath: { absolutePath: string; metadata: MemoryPathMetadata };
     try {
-      absolutePath = toSafeFilePath(vaultPath, normalizedPath);
+      resolvedPath = toSafeMemoryPath(vaultPath, normalizedPath, this.options.pluginConfig);
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : "Invalid memory path");
     }
 
+    const { absolutePath, metadata } = resolvedPath;
     if (!fs.existsSync(absolutePath)) {
-      return { text: "", path: normalizedPath };
+      return {
+        text: "",
+        path: metadata.relPath,
+        layer: metadata.layer,
+        category: metadata.category,
+        provenance: metadata.provenance
+      };
     }
 
     const raw = fs.readFileSync(absolutePath, "utf-8");
     if (!Number.isFinite(params.from) && !Number.isFinite(params.lines)) {
-      return { text: raw, path: normalizedPath };
+      return {
+        text: raw,
+        path: metadata.relPath,
+        layer: metadata.layer,
+        category: metadata.category,
+        provenance: metadata.provenance
+      };
     }
 
     const from = Number.isFinite(params.from) ? Math.max(1, Math.floor(Number(params.from))) : 1;
@@ -211,9 +332,14 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
     const chunks = raw.split(/\r?\n/);
     const startIndex = from - 1;
     const sliced = chunks.slice(startIndex, startIndex + lines);
+    const endLine = from + Math.max(0, sliced.length - 1);
     return {
       text: sliced.join("\n"),
-      path: normalizedPath
+      path: metadata.relPath,
+      layer: metadata.layer,
+      category: metadata.category,
+      provenance: metadata.provenance,
+      citation: `${metadata.relPath}#L${from}-L${endLine}`
     };
   }
 
@@ -225,7 +351,7 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
       provider: "clawvault",
       workspaceDir: vaultPath ?? this.options.workspaceDir,
       files: markdownFiles,
-      sources: ["memory", "sessions"],
+      sources: ["boot", "vault", "source"],
       vector: {
         enabled: true,
         available: hasQmd()
