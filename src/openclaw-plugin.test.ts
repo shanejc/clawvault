@@ -85,16 +85,13 @@ describe("openclaw plugin registration", () => {
     clawvaultPlugin.register(api);
 
     expect(hookNames).toContain("before_prompt_build");
-    expect(hookNames).toContain("message_sending");
     expect(hookNames).toContain("gateway_start");
     expect(hookNames).toContain("session_start");
     expect(hookNames).toContain("session_end");
     expect(hookNames).toContain("before_reset");
-    expect(hookNames).toContain("before_compaction");
-    expect(hookNames).toContain("agent_end");
   });
 
-  it("registers automation hooks when legacy automation flags are enabled", () => {
+  it("registers session-memory hooks when a legacy session flag is enabled", () => {
     const hookNames: string[] = [];
 
     const api = {
@@ -119,12 +116,42 @@ describe("openclaw plugin registration", () => {
     clawvaultPlugin.register(api);
 
     expect(hookNames).toContain("before_prompt_build");
-    expect(hookNames).toContain("message_sending");
     expect(hookNames).toContain("gateway_start");
     expect(hookNames).toContain("session_start");
     expect(hookNames).toContain("session_end");
     expect(hookNames).toContain("before_reset");
-    expect(hookNames).toContain("before_compaction");
-    expect(hookNames).toContain("agent_end");
   });
+
+  it("registers communication-policy hooks when communication pack is enabled", () => {
+    const hookNames: string[] = [];
+
+    const api = {
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        packToggles: {
+          "legacy-communication-policy": true
+        }
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string) => {
+        hookNames.push(hookName);
+      })
+    };
+
+    clawvaultPlugin.register(api);
+
+    expect(hookNames).toContain("before_prompt_build");
+    expect(hookNames).toContain("message_sending");
+    expect(hookNames).not.toContain("before_compaction");
+    expect(hookNames).not.toContain("agent_end");
+  });
+
 });
