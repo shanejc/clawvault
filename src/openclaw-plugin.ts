@@ -2,15 +2,17 @@ import { createMemorySlotPlugin, registerMemorySlot } from "./plugin/slot.js";
 import { readPluginConfig } from "./plugin/config.js";
 import {
   ClawVaultMemoryManager,
-  createMemoryCaptureSourceToolFactory,
   createMemoryCategoriesToolFactory,
   createMemoryClassifyToolFactory,
   createMemoryGetToolFactory,
-  createMemorySearchToolFactory,
+  createMemorySearchToolFactory
+} from "./plugin/memory-manager.js";
+import {
+  createMemoryCaptureSourceToolFactory,
   createMemoryUpdateToolFactory,
   createMemoryWriteBootToolFactory,
   createMemoryWriteVaultToolFactory
-} from "./plugin/memory-manager.js";
+} from "./plugin/memory-write-tools.js";
 import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 import { createBeforePromptBuildHandler } from "./plugin/hooks/before-prompt-build.js";
 import { createMessageSendingHandler } from "./plugin/hooks/message-sending.js";
@@ -58,11 +60,15 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
     pluginConfig,
     defaultAgentId: "main"
   }), { name: "memory_classify" });
-  api.registerTool(createMemoryWriteVaultToolFactory(memoryManager), { name: "memory_write_vault" });
-  api.registerTool(createMemoryWriteBootToolFactory(memoryManager), { name: "memory_write_boot" });
-  api.registerTool(createMemoryCaptureSourceToolFactory(memoryManager), { name: "memory_capture_source" });
-  api.registerTool(createMemoryUpdateToolFactory(memoryManager, "memory_update"), { name: "memory_update" });
-  api.registerTool(createMemoryUpdateToolFactory(memoryManager, "memory_patch"), { name: "memory_patch" });
+  const memoryWriteToolOptions = {
+    pluginConfig,
+    defaultAgentId: "main"
+  };
+  api.registerTool(createMemoryWriteVaultToolFactory(memoryWriteToolOptions), { name: "memory_write_vault" });
+  api.registerTool(createMemoryWriteBootToolFactory(memoryWriteToolOptions), { name: "memory_write_boot" });
+  api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
+  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
+  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
 
   api.on("before_prompt_build", createBeforePromptBuildHandler({
     pluginConfig,
