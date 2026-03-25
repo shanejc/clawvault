@@ -52,6 +52,13 @@ type MemoryWriteBootResult = MemoryWriteResultBase & {
   citations: SectionCitation[];
 };
 
+function toBootWriteMode(value: unknown): MemoryWriteBootMode {
+  if (value === "replace_section" || value === "upsert_section" || value === "append_under_section") {
+    return value;
+  }
+  throw new Error("mode must be one of: replace_section, upsert_section, append_under_section");
+}
+
 function resolveVaultPath(options: MemoryWriteToolOptions, sessionKey?: string): string | null {
   const derivedAgentId = sessionKey ? extractAgentIdFromSessionKey(sessionKey) : "";
   const agentId = derivedAgentId || options.defaultAgentId;
@@ -352,9 +359,7 @@ export function createMemoryWriteBootToolFactory(options: MemoryWriteToolOptions
       try {
         return await writeBootMemorySection(options, {
           content: typeof input.content === "string" ? input.content : "",
-          mode: input.mode === "replace_section" || input.mode === "append_under_section"
-            ? input.mode
-            : "upsert_section",
+          mode: toBootWriteMode(input.mode),
           section: typeof input.section === "string" ? input.section : "",
           sessionKey: typeof input.sessionKey === "string" ? input.sessionKey : undefined,
         });
