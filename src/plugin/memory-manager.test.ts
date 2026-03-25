@@ -297,4 +297,198 @@ describe("ClawVaultMemoryManager", () => {
     const afterAppend = fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8");
     expect((afterAppend.match(/^---$/gm) ?? []).length).toBe(2);
   });
+
+  it("memory_write_vault rejects missing provenance and non-vault targets", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.mkdirSync(path.join(vaultPath, "projects"), { recursive: true });
+    fs.mkdirSync(path.join(vaultPath, "memory"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({ categories: ["projects"] }, null, 2),
+      "utf-8"
+    );
+
+    const writeVaultTool = createMemoryWriteVaultToolFactory({
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    })();
+    const execute = writeVaultTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+    const missingProvenance = await execute({
+      category: "projects",
+      slug: "missing-provenance",
+      body: "content without provenance"
+    });
+    expect(missingProvenance.ok).toBe(false);
+    expect(String(missingProvenance.error)).toContain("provenance is required");
+
+    const bootTarget = await execute({
+      relPath: "MEMORY.md",
+      body: "should fail",
+      provenance: {
+        sourceType: "conversation",
+        originRef: "test://boot",
+        sessionKey: "agent/main/session"
+      }
+    });
+    expect(bootTarget.ok).toBe(false);
+    expect(String(bootTarget.error)).toContain("memory_write path not allowed for layer boot");
+
+    const sourceTarget = await execute({
+      relPath: "memory/source-only.md",
+      body: "should fail",
+      provenance: {
+        sourceType: "conversation",
+        originRef: "test://source",
+        sessionKey: "agent/main/session"
+      }
+    });
+    expect(sourceTarget.ok).toBe(false);
+    expect(String(sourceTarget.error)).toContain("memory_write path not allowed for layer source");
+  });
+
+  it("memory_capture_source writes only to source layer", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), "{}\n", "utf-8");
+    const captureTool = createMemoryCaptureSourceToolFactory({
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    })();
+    const execute = captureTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+    const sourceWrite = await execute({
+      relPath: "memory/chronology.md",
+      payload: "source capture",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(sourceWrite.ok).toBe(true);
+    expect(sourceWrite.layer).toBe("source");
+    expect(fs.readFileSync(path.join(vaultPath, "memory", "chronology.md"), "utf-8")).toContain("source capture");
+
+    const vaultTarget = await execute({
+      relPath: "projects/roadmap.md",
+      payload: "should fail",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture-vault",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(vaultTarget.ok).toBe(false);
+    expect(String(vaultTarget.error)).toContain("memory_write path not allowed for layer vault");
+
+    const bootTarget = await execute({
+      relPath: "MEMORY.md",
+      payload: "should fail",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture-boot",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(bootTarget.ok).toBe(false);
+    expect(String(bootTarget.error)).toContain("memory_write path not allowed for layer boot");
+  });
+
+  it("memory_write_boot performs section-aware updates on MEMORY.md", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), "{}\n", "utf-8");
+    fs.writeFileSync(
+      path.join(vaultPath, "MEMORY.md"),
+      "# Boot Memory\n\n## Session Summary\nOld summary\n\n## Next Steps\n- keep existing\n",
+      "utf-8"
+    );
+    const writeBootTool = createMemoryWriteBootToolFactory({
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    })();
+    const execute = writeBootTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+    const replaced = await execute({
+      mode: "replace_section",
+      section: "Session Summary",
+      content: "Updated summary"
+    });
+    expect(replaced.ok).toBe(true);
+    expect(replaced.modifiedSections).toEqual(["Session Summary"]);
+
+    const appended = await execute({
+      mode: "append_under_section",
+      section: "Next Steps",
+      content: "- follow-up action"
+    });
+    expect(appended.ok).toBe(true);
+
+    const upserted = await execute({
+      mode: "upsert_section",
+      section: "Decisions",
+      content: "- chose section-aware writes"
+    });
+    expect(upserted.ok).toBe(true);
+
+    const updatedMemory = fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8");
+    expect(updatedMemory).toContain("## Session Summary\nUpdated summary");
+    expect(updatedMemory).toContain("## Next Steps\n- keep existing\n- follow-up action");
+    expect(updatedMemory).toContain("## Decisions\n- chose section-aware writes");
+  });
+
+  it("memory_update and memory_patch modify docs, no-op empty patches, and fail safely on invalid patches", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.mkdirSync(path.join(vaultPath, "projects"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({ categories: ["projects"] }, null, 2),
+      "utf-8"
+    );
+    fs.writeFileSync(
+      path.join(vaultPath, "projects", "roadmap.md"),
+      "# Roadmap\n\n## Details\nInitial details\n",
+      "utf-8"
+    );
+
+    const options = { pluginConfig: { vaultPath }, defaultAgentId: "main" };
+    const updateTool = createMemoryUpdateToolFactory(options, "memory_update")();
+    const patchTool = createMemoryUpdateToolFactory(options, "memory_patch")();
+    const runUpdate = updateTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const runPatch = patchTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+    const replaced = await runUpdate({
+      id: "projects/roadmap",
+      content: "Replaced document",
+      mode: "replace"
+    });
+    expect(replaced.ok).toBe(true);
+    expect(replaced.noOp).toBe(false);
+    expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("Replaced document");
+
+    const appended = await runPatch({
+      id: "projects/roadmap",
+      content: "Appended patch line",
+      mode: "append"
+    });
+    expect(appended.ok).toBe(true);
+    expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("Appended patch line");
+
+    const emptyNoOp = await runUpdate({
+      id: "projects/roadmap",
+      content: "   ",
+      mode: "replace"
+    });
+    expect(emptyNoOp.ok).toBe(true);
+    expect(emptyNoOp.noOp).toBe(true);
+    expect(emptyNoOp.reason).toBe("empty patch content");
+
+    const invalidSectionPatch = await runPatch({
+      id: "projects/roadmap",
+      content: "won't apply",
+      mode: "replace",
+      section: "Missing Section"
+    });
+    expect(invalidSectionPatch.ok).toBe(false);
+    expect(String(invalidSectionPatch.error)).toContain("Section not found: Missing Section");
+  });
 });
