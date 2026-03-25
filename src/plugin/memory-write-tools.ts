@@ -3,9 +3,10 @@ import * as path from "path";
 import { extractAgentIdFromSessionKey, type ClawVaultPluginConfig } from "./config.js";
 import { resolveVaultPathForAgent } from "./clawvault-cli.js";
 import type { MemoryLayer } from "./memory-types.js";
-
-const DEFAULT_DURABLE_CATEGORIES = ["people", "projects", "decisions", "lessons", "tasks", "backlog", "handoffs"] as const;
-const DEFAULT_SOURCE_CATEGORIES = ["memory", "source", "sessions", "captures", "evidence", "chronology", "logs"] as const;
+import {
+  normalizeRelPath,
+  toSafeMemoryPath
+} from "./memory-manager.js";
 
 type MemoryWriteToolOptions = {
   pluginConfig: ClawVaultPluginConfig;
@@ -28,57 +29,6 @@ type MemoryWriteResult = {
   };
 };
 
-function normalizeRelPath(relPath: string): string {
-  return relPath
-    .replace(/\\/g, "/")
-    .replace(/^\.\/+/, "")
-    .replace(/^\/+/, "");
-}
-
-function isSafeCategoryName(value: string): boolean {
-  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
-}
-
-function inferLayerAndCategory(relPath: string): { layer: MemoryLayer; category: string } {
-  if (relPath === "MEMORY.md") {
-    return { layer: "boot", category: "boot" };
-  }
-  const category = relPath.split("/")[0] ?? "unknown";
-  if ((DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category)) {
-    return { layer: "source", category };
-  }
-  return { layer: "vault", category };
-}
-
-function collectWritableRoots(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
-  const roots = new Set<string>([...DEFAULT_DURABLE_CATEGORIES, ...DEFAULT_SOURCE_CATEGORIES]);
-  if (Array.isArray((pluginConfig as { memoryOverlayFolders?: unknown }).memoryOverlayFolders)) {
-    for (const value of (pluginConfig as { memoryOverlayFolders?: unknown[] }).memoryOverlayFolders ?? []) {
-      if (typeof value !== "string") continue;
-      const category = normalizeRelPath(value).split("/")[0] ?? "";
-      if (isSafeCategoryName(category)) roots.add(category);
-    }
-  }
-
-  const configPath = path.join(vaultPath, ".clawvault.json");
-  if (fs.existsSync(configPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-      for (const candidate of [parsed.categories, parsed.overlayCategories, parsed.customCategories, parsed.memoryReadRoots]) {
-        if (!Array.isArray(candidate)) continue;
-        for (const item of candidate) {
-          if (typeof item !== "string") continue;
-          const category = normalizeRelPath(item).split("/")[0] ?? "";
-          if (isSafeCategoryName(category)) roots.add(category);
-        }
-      }
-    } catch {
-      // Ignore invalid configuration JSON.
-    }
-  }
-  return roots;
-}
-
 function resolveVaultPath(options: MemoryWriteToolOptions, sessionKey?: string): string | null {
   const derivedAgentId = sessionKey ? extractAgentIdFromSessionKey(sessionKey) : "";
   const agentId = derivedAgentId || options.defaultAgentId;
@@ -99,32 +49,12 @@ function toSafeWritablePath(
   layer: MemoryLayer;
   category: string;
 } {
-  const normalized = normalizeRelPath(relPath);
-  const mapped = normalized.startsWith("qmd/")
-    ? normalized.split("/").slice(2).join("/")
-    : normalized;
-  if (!mapped || mapped.includes("..") || path.isAbsolute(mapped)) {
-    throw new Error("Invalid memory path");
-  }
-
-  const roots = collectWritableRoots(vaultPath, pluginConfig);
-  const topLevel = mapped.split("/")[0] ?? "";
-  const allowedRoot = topLevel.length > 0 && roots.has(topLevel);
-  if (mapped !== "MEMORY.md" && !allowedRoot) {
-    throw new Error(`memory_write path not allowed: ${mapped}`);
-  }
-
-  const absolutePath = path.resolve(vaultPath, mapped);
-  const vaultRootWithSep = vaultPath.endsWith(path.sep) ? vaultPath : `${vaultPath}${path.sep}`;
-  if (absolutePath !== vaultPath && !absolutePath.startsWith(vaultRootWithSep)) {
-    throw new Error("Path escapes vault root");
-  }
-
-  const { layer, category } = inferLayerAndCategory(mapped);
+  const { absolutePath, metadata } = toSafeMemoryPath(vaultPath, relPath, pluginConfig);
+  const { layer, category } = metadata;
   if (!allowedLayers.includes(layer)) {
-    throw new Error(`memory_write path not allowed for layer ${layer}: ${mapped}`);
+    throw new Error(`memory_write path not allowed for layer ${layer}: ${metadata.relPath}`);
   }
-  return { absolutePath, relPath: mapped, layer, category };
+  return { absolutePath, relPath: metadata.relPath, layer, category };
 }
 
 async function writeMemoryFile(

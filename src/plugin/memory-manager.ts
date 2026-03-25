@@ -22,8 +22,8 @@ import type {
 
 const DEFAULT_MAX_RESULTS = 6;
 const DEFAULT_MIN_SCORE = 0.2;
-const DEFAULT_DURABLE_CATEGORIES = ["people", "projects", "decisions", "lessons", "tasks", "backlog", "handoffs"] as const;
-const DEFAULT_SOURCE_CATEGORIES = ["memory", "source", "sessions", "captures", "evidence", "chronology", "logs"] as const;
+export const DEFAULT_DURABLE_CATEGORIES = ["people", "projects", "decisions", "lessons", "tasks", "backlog", "handoffs"] as const;
+export const DEFAULT_SOURCE_CATEGORIES = ["memory", "source", "sessions", "captures", "evidence", "chronology", "logs"] as const;
 
 type MemoryPathMetadata = {
   relPath: string;
@@ -53,7 +53,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizeRelPath(relPath: string): string {
+export function normalizeRelPath(relPath: string): string {
   return relPath
     .replace(/\\/g, "/")
     .replace(/^\.\/+/, "")
@@ -77,7 +77,7 @@ function estimateLineRange(content: string, snippet: string): { startLine: numbe
   return { startLine, endLine };
 }
 
-function inferLayerAndCategory(relPath: string): { layer: MemoryLayer; category: string } {
+export function inferLayerAndCategory(relPath: string): { layer: MemoryLayer; category: string } {
   if (relPath === "MEMORY.md") {
     return { layer: "boot", category: "boot" };
   }
@@ -211,7 +211,7 @@ function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPlug
     .sort((a, b) => a.category.localeCompare(b.category));
 }
 
-function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
+export function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
   const folders = new Set<string>();
   for (const entry of collectCategoryInventory(vaultPath, pluginConfig)) {
     if (entry.category === "boot") continue;
@@ -292,7 +292,7 @@ function classifyMemoryTarget(
   };
 }
 
-function toSafeMemoryPath(
+export function toSafeMemoryPath(
   vaultPath: string,
   relPath: string,
   pluginConfig: ClawVaultPluginConfig
