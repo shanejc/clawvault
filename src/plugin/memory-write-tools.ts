@@ -5,6 +5,8 @@ import { extractAgentIdFromSessionKey, type ClawVaultPluginConfig } from "./conf
 import { resolveVaultPathForAgent } from "./clawvault-cli.js";
 import type { MemoryLayer } from "./memory-types.js";
 import {
+  classifyMemoryTarget,
+  inferLayerAndCategory,
   toSafeMemoryPath
 } from "./memory-manager.js";
 
@@ -30,6 +32,13 @@ type MemoryWriteResultBase = {
 
 type MemoryWriteResult = MemoryWriteResultBase & {
   mode: "append" | "replace";
+};
+
+type MemoryWriteProvenanceInput = {
+  sourceType: string;
+  originRef: string;
+  timestamp?: string;
+  sessionKey?: string;
 };
 
 type MemoryWriteBootMode = "replace_section" | "upsert_section" | "append_under_section";
@@ -85,6 +94,115 @@ function toSafeWritablePath(
     throw new Error(`memory_write path not allowed for layer ${layer}: ${metadata.relPath}`);
   }
   return { absolutePath, relPath: metadata.relPath, layer, category };
+}
+
+function toWritablePathByTarget(
+  vaultPath: string,
+  pluginConfig: ClawVaultPluginConfig,
+  params: { relPath?: string; category?: string; slug?: string },
+  allowedLayers: MemoryLayer[]
+): {
+  absolutePath: string;
+  relPath: string;
+  layer: MemoryLayer;
+  category: string;
+} {
+  if (typeof params.relPath === "string" && params.relPath.trim()) {
+    return toSafeWritablePath(vaultPath, params.relPath, pluginConfig, allowedLayers);
+  }
+
+  const classified = classifyMemoryTarget(vaultPath, pluginConfig, {
+    category: params.category
+  });
+  if (!classified.ok || !classified.resolved) {
+    throw new Error(classified.error ?? "Invalid memory target");
+  }
+  if (!allowedLayers.includes(classified.resolved.layer)) {
+    throw new Error(`memory_write path not allowed for layer ${classified.resolved.layer}: ${classified.resolved.category}`);
+  }
+  const basename = (params.slug ?? `note-${Date.now()}`).trim();
+  const safeSlug = basename
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || `note-${Date.now()}`;
+  return toSafeWritablePath(
+    vaultPath,
+    `${classified.resolved.category}/${safeSlug}.md`,
+    pluginConfig,
+    allowedLayers
+  );
+}
+
+function parseProvenance(input: unknown): MemoryWriteProvenanceInput {
+  if (!input || typeof input !== "object") {
+    throw new Error("provenance is required");
+  }
+  const sourceType = typeof (input as { sourceType?: unknown }).sourceType === "string"
+    ? (input as { sourceType: string }).sourceType.trim()
+    : "";
+  const originRef = typeof (input as { originRef?: unknown }).originRef === "string"
+    ? (input as { originRef: string }).originRef.trim()
+    : "";
+  const timestamp = typeof (input as { timestamp?: unknown }).timestamp === "string"
+    ? (input as { timestamp: string }).timestamp.trim()
+    : undefined;
+  const sessionKey = typeof (input as { sessionKey?: unknown }).sessionKey === "string"
+    ? (input as { sessionKey: string }).sessionKey.trim()
+    : undefined;
+
+  if (!sourceType) {
+    throw new Error("provenance.sourceType is required");
+  }
+  if (!originRef) {
+    throw new Error("provenance.originRef is required");
+  }
+  if (!timestamp && !sessionKey) {
+    throw new Error("provenance.timestamp or provenance.sessionKey is required");
+  }
+  return { sourceType, originRef, timestamp, sessionKey };
+}
+
+function buildFrontmatter(params: {
+  title?: string;
+  tags?: string[];
+  provenance: MemoryWriteProvenanceInput;
+  extras?: Record<string, unknown>;
+}): string {
+  const entries: Array<[string, unknown]> = [];
+  if (params.title) entries.push(["title", params.title]);
+  if (params.tags && params.tags.length > 0) entries.push(["tags", params.tags]);
+  entries.push(["provenance", {
+    sourceType: params.provenance.sourceType,
+    originRef: params.provenance.originRef,
+    timestamp: params.provenance.timestamp ?? null,
+    sessionKey: params.provenance.sessionKey ?? null
+  }]);
+  if (params.extras) {
+    for (const [key, value] of Object.entries(params.extras)) {
+      entries.push([key, value]);
+    }
+  }
+
+  const lines: string[] = ["---"];
+  for (const [key, value] of entries) {
+    if (Array.isArray(value)) {
+      lines.push(`${key}:`);
+      for (const item of value) {
+        lines.push(`  - ${String(item)}`);
+      }
+      continue;
+    }
+    if (value && typeof value === "object") {
+      lines.push(`${key}:`);
+      for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+        lines.push(`  ${nestedKey}: ${JSON.stringify(nestedValue)}`);
+      }
+      continue;
+    }
+    lines.push(`${key}: ${JSON.stringify(value)}`);
+  }
+  lines.push("---", "");
+  return `${lines.join("\n")}`;
 }
 
 async function writeMemoryFile(
@@ -319,22 +437,142 @@ async function writeBootMemorySection(
   };
 }
 
+async function patchDurableMemory(
+  options: MemoryWriteToolOptions,
+  params: {
+    id?: string;
+    relPath?: string;
+    content: string;
+    mode?: "append" | "replace";
+    section?: string;
+    sessionKey?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const vaultPath = resolveVaultPath(options, params.sessionKey);
+  if (!vaultPath) {
+    throw new Error("Vault not configured");
+  }
+
+  const idOrPath = typeof params.id === "string" && params.id.trim()
+    ? params.id
+    : (params.relPath ?? "");
+  if (!idOrPath.trim()) {
+    throw new Error("id or relPath is required");
+  }
+
+  const resolved = toSafeWritablePath(vaultPath, idOrPath, options.pluginConfig, ["vault"]);
+  if (!fs.existsSync(resolved.absolutePath)) {
+    throw new Error(`Document not found: ${resolved.relPath}`);
+  }
+
+  if (!params.content.trim()) {
+    return {
+      ok: true,
+      noOp: true,
+      reason: "empty patch content",
+      path: resolved.relPath,
+      layer: resolved.layer,
+      category: resolved.category,
+      provenance: {
+        source: "clawvault",
+        relPath: resolved.relPath,
+        absolutePath: resolved.absolutePath
+      }
+    };
+  }
+
+  const vault = new ClawVault(vaultPath);
+  await vault.patch({
+    idOrPath: resolved.relPath,
+    mode: params.mode === "append" ? "append" : "content",
+    append: params.mode === "append" ? params.content : undefined,
+    content: params.mode === "append" ? undefined : params.content,
+    section: params.section?.trim() || undefined
+  });
+  const raw = fs.readFileSync(resolved.absolutePath, "utf-8");
+  return {
+    ok: true,
+    noOp: false,
+    path: resolved.relPath,
+    layer: resolved.layer,
+    category: resolved.category,
+    bytes: Buffer.byteLength(raw, "utf-8"),
+    mode: params.mode === "append" ? "append" : "replace",
+    provenance: {
+      source: "clawvault",
+      relPath: resolved.relPath,
+      absolutePath: resolved.absolutePath
+    }
+  };
+}
+
 export function createMemoryWriteVaultToolFactory(options: MemoryWriteToolOptions): () => Record<string, unknown> {
   return () => {
     const inputSchema = buildToolSchema({
-      relPath: { type: "string" },
-      content: { type: "string" },
+      relPath: { type: "string", description: "Optional classified durable target path." },
+      category: { type: "string", description: "Durable category when relPath is omitted." },
+      slug: { type: "string", description: "Optional filename slug when targeting category only." },
+      body: { type: "string", description: "Durable memory body content." },
+      content: { type: "string", description: "Deprecated alias for body." },
+      title: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
+      frontmatter: { type: "object", additionalProperties: true },
+      provenance: {
+        type: "object",
+        properties: {
+          sourceType: { type: "string" },
+          originRef: { type: "string" },
+          timestamp: { type: "string" },
+          sessionKey: { type: "string" }
+        },
+        required: ["sourceType", "originRef"],
+        additionalProperties: false
+      },
       mode: { type: "string", enum: ["append", "replace"] },
       sessionKey: { type: "string" }
-    }, ["relPath", "content"]);
+    }, ["body", "provenance"]);
 
     const execute = async (input: Record<string, unknown>) => {
       try {
+        const provenance = parseProvenance(input.provenance);
+        const body = typeof input.body === "string"
+          ? input.body
+          : (typeof input.content === "string" ? input.content : "");
+        const title = typeof input.title === "string" ? input.title.trim() : "";
+        const tags = Array.isArray(input.tags) ? input.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0) : [];
+        const frontmatterExtras = input.frontmatter && typeof input.frontmatter === "object"
+          ? input.frontmatter as Record<string, unknown>
+          : undefined;
+        const targetSession = typeof input.sessionKey === "string" ? input.sessionKey : undefined;
+        const vaultPath = resolveVaultPath(options, targetSession);
+        if (!vaultPath) {
+          throw new Error("Vault not configured");
+        }
+        const resolved = toWritablePathByTarget(
+          vaultPath,
+          options.pluginConfig,
+          {
+            relPath: typeof input.relPath === "string" ? input.relPath : undefined,
+            category: typeof input.category === "string" ? input.category : undefined,
+            slug: typeof input.slug === "string" ? input.slug : (title || undefined)
+          },
+          ["vault"]
+        );
+        const inferred = inferLayerAndCategory(resolved.relPath);
+        if (inferred.layer !== "vault") {
+          throw new Error(`memory_write_vault requires a durable category target: ${resolved.relPath}`);
+        }
+        const contentWithFrontmatter = `${buildFrontmatter({
+          title: title || undefined,
+          tags,
+          provenance,
+          extras: frontmatterExtras
+        })}${body}${body.endsWith("\n") ? "" : "\n"}`;
         return await writeMemoryFile(options, {
-          relPath: typeof input.relPath === "string" ? input.relPath : "",
-          content: typeof input.content === "string" ? input.content : "",
+          relPath: resolved.relPath,
+          content: contentWithFrontmatter,
           mode: input.mode === "replace" ? "replace" : "append",
-          sessionKey: typeof input.sessionKey === "string" ? input.sessionKey : undefined,
+          sessionKey: targetSession,
           allowedLayers: ["vault"]
         });
       } catch (error) {
@@ -375,19 +613,44 @@ export function createMemoryWriteBootToolFactory(options: MemoryWriteToolOptions
 export function createMemoryCaptureSourceToolFactory(options: MemoryWriteToolOptions): () => Record<string, unknown> {
   return () => {
     const inputSchema = buildToolSchema({
-      relPath: { type: "string" },
-      content: { type: "string" },
+      relPath: { type: "string", description: "Optional source-layer target path." },
+      category: { type: "string", description: "Source-layer category (memory/source/captures/chronology/etc)." },
+      slug: { type: "string" },
+      payload: { type: "string", description: "Raw chronology/evidence payload." },
+      provenance: {
+        type: "object",
+        properties: {
+          sourceType: { type: "string" },
+          originRef: { type: "string" },
+          timestamp: { type: "string" },
+          sessionKey: { type: "string" }
+        },
+        required: ["sourceType", "originRef"],
+        additionalProperties: false
+      },
       mode: { type: "string", enum: ["append", "replace"] },
       sessionKey: { type: "string" }
-    }, ["relPath", "content"]);
+    }, ["payload", "provenance"]);
 
     const execute = async (input: Record<string, unknown>) => {
       try {
+        parseProvenance(input.provenance);
+        const payload = typeof input.payload === "string" ? input.payload : "";
+        const sessionKey = typeof input.sessionKey === "string" ? input.sessionKey : undefined;
+        const vaultPath = resolveVaultPath(options, sessionKey);
+        if (!vaultPath) {
+          throw new Error("Vault not configured");
+        }
+        const resolved = toWritablePathByTarget(vaultPath, options.pluginConfig, {
+          relPath: typeof input.relPath === "string" ? input.relPath : undefined,
+          category: typeof input.category === "string" ? input.category : undefined,
+          slug: typeof input.slug === "string" ? input.slug : undefined
+        }, ["source"]);
         return await writeMemoryFile(options, {
-          relPath: typeof input.relPath === "string" ? input.relPath : "",
-          content: typeof input.content === "string" ? input.content : "",
+          relPath: resolved.relPath,
+          content: payload,
           mode: input.mode === "replace" ? "replace" : "append",
-          sessionKey: typeof input.sessionKey === "string" ? input.sessionKey : undefined,
+          sessionKey,
           allowedLayers: ["source"]
         });
       } catch (error) {
@@ -405,24 +668,23 @@ export function createMemoryUpdateToolFactory(
 ): () => Record<string, unknown> {
   return () => {
     const inputSchema = buildToolSchema({
+      id: { type: "string", description: "Document id/path to patch." },
       relPath: { type: "string" },
       content: { type: "string" },
-      startLine: { type: "number", minimum: 1 },
-      endLine: { type: "number", minimum: 1 },
       mode: { type: "string", enum: ["append", "replace"] },
+      section: { type: "string" },
       sessionKey: { type: "string" }
-    }, ["relPath", "content"]);
+    }, ["content"]);
 
     const execute = async (input: Record<string, unknown>) => {
       try {
-        return await writeMemoryFile(options, {
-          relPath: typeof input.relPath === "string" ? input.relPath : "",
+        return await patchDurableMemory(options, {
+          id: typeof input.id === "string" ? input.id : undefined,
+          relPath: typeof input.relPath === "string" ? input.relPath : undefined,
           content: typeof input.content === "string" ? input.content : "",
-          startLine: Number.isFinite(Number(input.startLine)) ? Number(input.startLine) : undefined,
-          endLine: Number.isFinite(Number(input.endLine)) ? Number(input.endLine) : undefined,
           mode: input.mode === "replace" ? "replace" : "append",
+          section: typeof input.section === "string" ? input.section : undefined,
           sessionKey: typeof input.sessionKey === "string" ? input.sessionKey : undefined,
-          allowedLayers: ["vault", "source", "boot"]
         });
       } catch (error) {
         return buildWriteToolResultError(error);
