@@ -5,13 +5,15 @@ import * as path from "path";
 import { ClawVault } from "../lib/vault.js";
 import {
   ClawVaultMemoryManager,
-  createMemoryCaptureSourceToolFactory,
   createMemoryCategoriesToolFactory,
-  createMemoryClassifyToolFactory,
+  createMemoryClassifyToolFactory
+} from "./memory-manager.js";
+import {
+  createMemoryCaptureSourceToolFactory,
   createMemoryUpdateToolFactory,
   createMemoryWriteBootToolFactory,
   createMemoryWriteVaultToolFactory
-} from "./memory-manager.js";
+} from "./memory-write-tools.js";
 
 const tempDirs: string[] = [];
 
@@ -221,14 +223,14 @@ describe("ClawVaultMemoryManager", () => {
       JSON.stringify({ categories: ["projects"] }, null, 2),
       "utf-8"
     );
-    const manager = new ClawVaultMemoryManager({
-      pluginConfig: { vaultPath }
-    });
-
-    const writeVaultTool = createMemoryWriteVaultToolFactory(manager)();
-    const writeBootTool = createMemoryWriteBootToolFactory(manager)();
-    const captureTool = createMemoryCaptureSourceToolFactory(manager)();
-    const updateTool = createMemoryUpdateToolFactory(manager, "memory_patch")();
+    const writeOptions = {
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    };
+    const writeVaultTool = createMemoryWriteVaultToolFactory(writeOptions)();
+    const writeBootTool = createMemoryWriteBootToolFactory(writeOptions)();
+    const captureTool = createMemoryCaptureSourceToolFactory(writeOptions)();
+    const updateTool = createMemoryUpdateToolFactory(writeOptions, "memory_patch")();
 
     for (const tool of [writeVaultTool, writeBootTool, captureTool, updateTool]) {
       expect(tool.inputSchema).toBeDefined();
