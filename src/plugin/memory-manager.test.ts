@@ -276,11 +276,25 @@ describe("ClawVaultMemoryManager", () => {
     expect(fs.readFileSync(path.join(vaultPath, "captures", "session-1.md"), "utf-8")).toContain("Captured evidence");
 
     const patchResult = await (updateTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
-      relPath: "projects/roadmap.md",
+      id: "projects/roadmap",
       content: "## Updated",
       mode: "replace"
     });
     expect(patchResult.ok).toBe(true);
     expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("## Updated");
+
+    const appendResult = await (writeVaultTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "projects/roadmap.md",
+      body: "\nAppended line",
+      mode: "append",
+      provenance: {
+        sourceType: "conversation",
+        originRef: "test://session-append",
+        sessionKey: "agent/main/session"
+      }
+    });
+    expect(appendResult.ok).toBe(true);
+    const afterAppend = fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8");
+    expect((afterAppend.match(/^---$/gm) ?? []).length).toBe(2);
   });
 });

@@ -460,7 +460,29 @@ async function patchDurableMemory(
     throw new Error("id or relPath is required");
   }
 
-  const resolved = toSafeWritablePath(vaultPath, idOrPath, options.pluginConfig, ["vault"]);
+  const idCandidates = [idOrPath];
+  if (!idOrPath.toLowerCase().endsWith(".md")) {
+    idCandidates.push(`${idOrPath}.md`);
+  }
+  let resolved: { absolutePath: string; relPath: string; layer: MemoryLayer; category: string } | null = null;
+  let lastError: unknown = null;
+  for (const candidate of idCandidates) {
+    try {
+      const maybeResolved = toSafeWritablePath(vaultPath, candidate, options.pluginConfig, ["vault"]);
+      if (fs.existsSync(maybeResolved.absolutePath)) {
+        resolved = maybeResolved;
+        break;
+      }
+      if (!resolved) {
+        resolved = maybeResolved;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!resolved) {
+    throw new Error(lastError instanceof Error ? lastError.message : "Invalid memory path");
+  }
   if (!fs.existsSync(resolved.absolutePath)) {
     throw new Error(`Document not found: ${resolved.relPath}`);
   }
@@ -562,16 +584,21 @@ export function createMemoryWriteVaultToolFactory(options: MemoryWriteToolOption
         if (inferred.layer !== "vault") {
           throw new Error(`memory_write_vault requires a durable category target: ${resolved.relPath}`);
         }
-        const contentWithFrontmatter = `${buildFrontmatter({
-          title: title || undefined,
-          tags,
-          provenance,
-          extras: frontmatterExtras
-        })}${body}${body.endsWith("\n") ? "" : "\n"}`;
+        const writeMode = input.mode === "replace" ? "replace" : "append";
+        const fileExists = fs.existsSync(resolved.absolutePath);
+        const shouldPrependFrontmatter = writeMode === "replace" || !fileExists;
+        const contentWithFrontmatter = shouldPrependFrontmatter
+          ? `${buildFrontmatter({
+            title: title || undefined,
+            tags,
+            provenance,
+            extras: frontmatterExtras
+          })}${body}${body.endsWith("\n") ? "" : "\n"}`
+          : `${body}${body.endsWith("\n") ? "" : "\n"}`;
         return await writeMemoryFile(options, {
           relPath: resolved.relPath,
           content: contentWithFrontmatter,
-          mode: input.mode === "replace" ? "replace" : "append",
+          mode: writeMode,
           sessionKey: targetSession,
           allowedLayers: ["vault"]
         });
