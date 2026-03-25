@@ -43,7 +43,11 @@ describe("memory_write_boot tool", () => {
     expect(result.citations).toEqual([
       expect.objectContaining({
         section: "Working Set",
-        citation: expect.stringMatching(/^MEMORY\.md#L\d+-L\d+$/)
+        citation: expect.stringMatching(/^MEMORY\.md#L\d+-L\d+$/),
+        provenance: expect.objectContaining({
+          source: "clawvault",
+          relPath: "MEMORY.md"
+        })
       })
     ]);
     const updated = fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8");
