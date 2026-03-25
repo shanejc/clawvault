@@ -91,4 +91,21 @@ describe("memory_write_boot tool", () => {
     expect(result.ok).toBe(false);
     expect(String(result.error)).toContain("section is required");
   });
+
+  it("rejects unknown write modes instead of defaulting implicitly", async () => {
+    const vaultPath = createVaultFixture();
+    vaults.push(vaultPath);
+    const tool = createMemoryWriteBootToolFactory({ pluginConfig: { vaultPath } })() as {
+      execute: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    };
+
+    const result = await tool.execute({
+      mode: "append",
+      section: "Goals",
+      content: "- should fail"
+    });
+
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toContain("mode must be one of");
+  });
 });
