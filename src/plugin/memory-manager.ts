@@ -223,7 +223,7 @@ export function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: Cl
   return folders;
 }
 
-function classifyMemoryTarget(
+export function classifyMemoryTarget(
   vaultPath: string,
   pluginConfig: ClawVaultPluginConfig,
   params: { relPath?: string; category?: string }

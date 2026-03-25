@@ -241,21 +241,36 @@ describe("ClawVaultMemoryManager", () => {
     }
 
     const writeVaultResult = await (writeVaultTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
-      relPath: "projects/roadmap.md",
-      content: "# Roadmap"
+      category: "projects",
+      slug: "roadmap",
+      body: "# Roadmap",
+      provenance: {
+        sourceType: "conversation",
+        originRef: "test://session",
+        sessionKey: "agent/main/session"
+      }
     });
     expect(writeVaultResult.ok).toBe(true);
     expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("# Roadmap");
+    expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("provenance:");
 
     const writeBootResult = await (writeBootTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      mode: "upsert_section",
+      section: "Session Summary",
       content: "# Boot Memory"
     });
     expect(writeBootResult.ok).toBe(true);
     expect(fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8")).toContain("# Boot Memory");
 
     const captureResult = await (captureTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
-      relPath: "captures/session-1.md",
-      content: "Captured evidence"
+      category: "captures",
+      slug: "session-1",
+      payload: "Captured evidence",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
     });
     expect(captureResult.ok).toBe(true);
     expect(fs.readFileSync(path.join(vaultPath, "captures", "session-1.md"), "utf-8")).toContain("Captured evidence");
@@ -263,8 +278,7 @@ describe("ClawVaultMemoryManager", () => {
     const patchResult = await (updateTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
       relPath: "projects/roadmap.md",
       content: "## Updated",
-      startLine: 1,
-      endLine: 1
+      mode: "replace"
     });
     expect(patchResult.ok).toBe(true);
     expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("## Updated");
