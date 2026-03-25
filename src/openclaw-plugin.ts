@@ -1,6 +1,12 @@
 import { createMemorySlotPlugin, registerMemorySlot } from "./plugin/slot.js";
 import { readPluginConfig } from "./plugin/config.js";
-import { ClawVaultMemoryManager, createMemoryGetToolFactory, createMemorySearchToolFactory } from "./plugin/memory-manager.js";
+import {
+  ClawVaultMemoryManager,
+  createMemoryCategoriesToolFactory,
+  createMemoryClassifyToolFactory,
+  createMemoryGetToolFactory,
+  createMemorySearchToolFactory
+} from "./plugin/memory-manager.js";
 import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 import { createBeforePromptBuildHandler } from "./plugin/hooks/before-prompt-build.js";
 import { createMessageSendingHandler } from "./plugin/hooks/message-sending.js";
@@ -40,6 +46,14 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
 
   api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
   api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
+  api.registerTool(createMemoryCategoriesToolFactory({
+    pluginConfig,
+    defaultAgentId: "main"
+  }), { name: "memory_categories" });
+  api.registerTool(createMemoryClassifyToolFactory({
+    pluginConfig,
+    defaultAgentId: "main"
+  }), { name: "memory_classify" });
 
   api.on("before_prompt_build", createBeforePromptBuildHandler({
     pluginConfig,
