@@ -1,5 +1,5 @@
 import { createMemorySlotPlugin, registerMemorySlot } from "./plugin/slot.js";
-import { readPluginConfig } from "./plugin/config.js";
+import { isOptInEnabled, readPluginConfig } from "./plugin/config.js";
 import {
   ClawVaultMemoryManager,
   createMemoryCategoriesToolFactory,
@@ -37,6 +37,26 @@ interface AutomationHookDependencies {
 
 function isAutomationModeEnabled(pluginConfig: ClawVaultPluginConfig): boolean {
   if (pluginConfig.automationMode === true) {
+    return true;
+  }
+
+  if (isOptInEnabled(
+    pluginConfig,
+    "enableStartupRecovery",
+    "enableSessionContextInjection",
+    "enableAutoCheckpoint",
+    "enableObserveOnNew",
+    "enableHeartbeatObservation",
+    "enableCompactionObservation",
+    "enableWeeklyReflection",
+    "enableFactExtraction",
+    "autoCheckpoint",
+    "observeOnHeartbeat",
+    "weeklyReflection",
+    "enableBeforePromptRecall",
+    "enforceCommunicationProtocol",
+    "enableMessageSendingFilter"
+  )) {
     return true;
   }
 
