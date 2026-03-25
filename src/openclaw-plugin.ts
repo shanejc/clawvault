@@ -1,5 +1,5 @@
 import { createMemorySlotPlugin, registerMemorySlot } from "./plugin/slot.js";
-import { readPluginConfig } from "./plugin/config.js";
+import { isOptInEnabled, readPluginConfig } from "./plugin/config.js";
 import {
   ClawVaultMemoryManager,
   createMemoryCategoriesToolFactory,
@@ -27,48 +27,46 @@ import {
   handleBeforeCompactionObservation
 } from "./plugin/hooks/observation.js";
 import type { OpenClawPluginApi } from "./plugin/openclaw-types.js";
+import type { ClawVaultPluginConfig } from "./plugin/config.js";
 
-function isOpenClawPluginApi(value: unknown): value is OpenClawPluginApi {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.on === "function"
-    && typeof record.registerTool === "function"
-    && typeof record.logger === "object";
+interface AutomationHookDependencies {
+  pluginConfig: ClawVaultPluginConfig;
+  runtimeState: ClawVaultPluginRuntimeState;
+  memoryManager: ClawVaultMemoryManager;
 }
 
-function registerOpenClawPlugin(api: OpenClawPluginApi): {
-  plugins: { slots: { memory: ClawVaultMemoryManager } };
-} {
-  const pluginConfig = readPluginConfig(api);
-  const runtimeState = new ClawVaultPluginRuntimeState();
-  const memoryManager = new ClawVaultMemoryManager({
-    pluginConfig,
-    defaultAgentId: "main",
-    logger: {
-      debug: api.logger.debug,
-      warn: api.logger.warn
-    }
-  });
+function isAutomationModeEnabled(pluginConfig: ClawVaultPluginConfig): boolean {
+  if (pluginConfig.automationMode === true) {
+    return true;
+  }
 
-  api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
-  api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
-  api.registerTool(createMemoryCategoriesToolFactory({
+  if (isOptInEnabled(
     pluginConfig,
-    defaultAgentId: "main"
-  }), { name: "memory_categories" });
-  api.registerTool(createMemoryClassifyToolFactory({
-    pluginConfig,
-    defaultAgentId: "main"
-  }), { name: "memory_classify" });
-  const memoryWriteToolOptions = {
-    pluginConfig,
-    defaultAgentId: "main"
-  };
-  api.registerTool(createMemoryWriteVaultToolFactory(memoryWriteToolOptions), { name: "memory_write_vault" });
-  api.registerTool(createMemoryWriteBootToolFactory(memoryWriteToolOptions), { name: "memory_write_boot" });
-  api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
-  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
-  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
+    "enableStartupRecovery",
+    "enableSessionContextInjection",
+    "enableAutoCheckpoint",
+    "enableObserveOnNew",
+    "enableHeartbeatObservation",
+    "enableCompactionObservation",
+    "enableWeeklyReflection",
+    "enableFactExtraction",
+    "autoCheckpoint",
+    "observeOnHeartbeat",
+    "weeklyReflection",
+    "enableBeforePromptRecall",
+    "enforceCommunicationProtocol",
+    "enableMessageSendingFilter"
+  )) {
+    return true;
+  }
+
+  return pluginConfig.automationPreset === "hybrid"
+    || pluginConfig.automationPreset === "legacy"
+    || pluginConfig.automationPreset === "automation";
+}
+
+function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDependencies): void {
+  const { pluginConfig, runtimeState, memoryManager } = deps;
 
   api.on("before_prompt_build", createBeforePromptBuildHandler({
     pluginConfig,
@@ -125,6 +123,57 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
       logger: api.logger
     });
   });
+}
+
+function isOpenClawPluginApi(value: unknown): value is OpenClawPluginApi {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.on === "function"
+    && typeof record.registerTool === "function"
+    && typeof record.logger === "object";
+}
+
+function registerOpenClawPlugin(api: OpenClawPluginApi): {
+  plugins: { slots: { memory: ClawVaultMemoryManager } };
+} {
+  const pluginConfig = readPluginConfig(api);
+  const runtimeState = new ClawVaultPluginRuntimeState();
+  const memoryManager = new ClawVaultMemoryManager({
+    pluginConfig,
+    defaultAgentId: "main",
+    logger: {
+      debug: api.logger.debug,
+      warn: api.logger.warn
+    }
+  });
+
+  api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
+  api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
+  api.registerTool(createMemoryCategoriesToolFactory({
+    pluginConfig,
+    defaultAgentId: "main"
+  }), { name: "memory_categories" });
+  api.registerTool(createMemoryClassifyToolFactory({
+    pluginConfig,
+    defaultAgentId: "main"
+  }), { name: "memory_classify" });
+  const memoryWriteToolOptions = {
+    pluginConfig,
+    defaultAgentId: "main"
+  };
+  api.registerTool(createMemoryWriteVaultToolFactory(memoryWriteToolOptions), { name: "memory_write_vault" });
+  api.registerTool(createMemoryWriteBootToolFactory(memoryWriteToolOptions), { name: "memory_write_boot" });
+  api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
+  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
+  api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
+
+  if (isAutomationModeEnabled(pluginConfig)) {
+    registerAutomationHooks(api, {
+      pluginConfig,
+      runtimeState,
+      memoryManager
+    });
+  }
 
   return {
     plugins: {
