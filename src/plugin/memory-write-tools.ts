@@ -14,19 +14,22 @@ type MemoryWriteToolOptions = {
   defaultAgentId?: string;
 };
 
-type MemoryWriteResult = {
+type MemoryWriteResultBase = {
   ok: boolean;
   path: string;
   layer: MemoryLayer;
   category: string;
   bytes: number;
-  mode: "append" | "replace";
   created: boolean;
   provenance: {
     source: "clawvault";
     relPath: string;
     absolutePath: string;
   };
+};
+
+type MemoryWriteResult = MemoryWriteResultBase & {
+  mode: "append" | "replace";
 };
 
 type MemoryWriteBootMode = "replace_section" | "upsert_section" | "append_under_section";
@@ -36,9 +39,14 @@ type SectionCitation = {
   startLine: number;
   endLine: number;
   citation: string;
+  provenance: {
+    source: "clawvault";
+    relPath: string;
+    absolutePath: string;
+  };
 };
 
-type MemoryWriteBootResult = MemoryWriteResult & {
+type MemoryWriteBootResult = MemoryWriteResultBase & {
   mode: MemoryWriteBootMode;
   modifiedSections: string[];
   citations: SectionCitation[];
@@ -289,7 +297,12 @@ async function writeBootMemorySection(
       section: updatedSection.name,
       startLine: updatedSection.startLine,
       endLine: updatedSection.endLine,
-      citation: `${resolved.relPath}#L${updatedSection.startLine}-L${updatedSection.endLine}`
+      citation: `${resolved.relPath}#L${updatedSection.startLine}-L${updatedSection.endLine}`,
+      provenance: {
+        source: "clawvault",
+        relPath: resolved.relPath,
+        absolutePath: resolved.absolutePath
+      }
     }],
     provenance: {
       source: "clawvault",
