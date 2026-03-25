@@ -3,7 +3,11 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ClawVault } from "../lib/vault.js";
-import { ClawVaultMemoryManager } from "./memory-manager.js";
+import {
+  ClawVaultMemoryManager,
+  createMemoryCategoriesToolFactory,
+  createMemoryClassifyToolFactory
+} from "./memory-manager.js";
 
 const tempDirs: string[] = [];
 
@@ -136,5 +140,73 @@ describe("ClawVaultMemoryManager", () => {
 
     const vectorProbe = await manager.probeVectorAvailability();
     expect(typeof vectorProbe).toBe("boolean");
+  });
+
+  it("returns category inventory including plugin overlay categories", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({ categories: ["playbooks"] }, null, 2),
+      "utf-8"
+    );
+
+    const tool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["incidents", "sessions/raw"]
+      },
+      defaultAgentId: "main"
+    })();
+
+    const result = await (tool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = result.categories as Array<{ category: string; layer: string; readEnabled: boolean; sources: string[] }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry]));
+
+    expect(byCategory.get("boot")?.layer).toBe("boot");
+    expect(byCategory.get("playbooks")?.sources).toContain(".clawvault.json");
+    expect(byCategory.get("incidents")?.sources).toContain("plugin");
+    expect(byCategory.get("sessions")?.layer).toBe("source");
+    expect(byCategory.get("incidents")?.readEnabled).toBe(true);
+  });
+
+  it("classifies relPath and category hints with retrieval-identical layer semantics", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.mkdirSync(path.join(vaultPath, "projects"), { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), JSON.stringify({ categories: ["projects"] }), "utf-8");
+
+    const manager = new ClawVaultMemoryManager({
+      pluginConfig: { vaultPath }
+    });
+    const classifyTool = createMemoryClassifyToolFactory({
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    })();
+
+    const bootClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "MEMORY.md"
+    });
+    expect(bootClassified.ok).toBe(true);
+    expect((bootClassified.resolved as { layer: string }).layer).toBe("boot");
+
+    const sourceClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "memory/2026-03-24.md"
+    });
+    expect((sourceClassified.resolved as { layer: string; category: string }).layer).toBe("source");
+    expect((sourceClassified.resolved as { layer: string; category: string }).category).toBe("memory");
+
+    const vaultClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "projects/roadmap.md"
+    });
+    expect((vaultClassified.resolved as { layer: string; category: string }).layer).toBe("vault");
+    expect((vaultClassified.resolved as { layer: string; category: string }).category).toBe("projects");
+
+    const retrieval = await manager.readFile({ relPath: "projects/roadmap.md" });
+    expect(retrieval.layer).toBe((vaultClassified.resolved as { layer: string }).layer);
+
+    const hintClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      category: "projects"
+    });
+    expect(hintClassified.ok).toBe(true);
+    expect((hintClassified.resolved as { readEnabled: boolean }).readEnabled).toBe(true);
   });
 });

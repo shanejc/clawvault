@@ -30,7 +30,11 @@ describe("openclaw plugin registration", () => {
     expect(result).toBeDefined();
     expect(typeof (result as { then?: unknown }).then).not.toBe("function");
 
-    expect(registerTool).toHaveBeenCalledTimes(2);
+    expect(registerTool).toHaveBeenCalledTimes(4);
+    expect(registerTool).toHaveBeenCalledWith(expect.any(Function), { name: "memory_search" });
+    expect(registerTool).toHaveBeenCalledWith(expect.any(Function), { name: "memory_get" });
+    expect(registerTool).toHaveBeenCalledWith(expect.any(Function), { name: "memory_categories" });
+    expect(registerTool).toHaveBeenCalledWith(expect.any(Function), { name: "memory_classify" });
     expect(hookNames).toContain("before_prompt_build");
     expect(hookNames).toContain("message_sending");
     expect(hookNames).toContain("gateway_start");
