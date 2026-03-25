@@ -11,6 +11,7 @@ ClawVault is a structured persistent memory system for AI agents. It stores memo
 Standard commands are in `package.json` scripts:
 
 - `npm install` — install dependencies
+- `npm install:restricted` — install dependencies for restricted environments (run if you have trouble with `npm run typecheck` or `npm test`)
 - `npm run build` — compile TypeScript via tsup (required before `bin/` tests pass)
 - `npm run typecheck` — type-check without emitting
 - `npm test` — run vitest (564 tests across 79 files)
