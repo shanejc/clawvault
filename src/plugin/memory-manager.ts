@@ -32,6 +32,13 @@ type MemoryPathMetadata = {
   provenance: MemoryProvenance;
 };
 
+type CategoryInventoryEntry = {
+  category: string;
+  layer: MemoryLayer;
+  readEnabled: boolean;
+  sources: string[];
+};
+
 export interface ClawVaultMemoryManagerOptions {
   pluginConfig: ClawVaultPluginConfig;
   workspaceDir?: string;
@@ -140,23 +147,30 @@ function isSafeCategoryName(value: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
 }
 
-function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
-  const folders = new Set<string>();
+function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryInventoryEntry[] {
+  const categorySources = new Map<string, Set<string>>();
+  const addCategory = (rawName: string, source: string) => {
+    const category = normalizeRelPath(rawName).split("/")[0] ?? "";
+    if (!isSafeCategoryName(category)) return;
+    const existing = categorySources.get(category) ?? new Set<string>();
+    existing.add(source);
+    categorySources.set(category, existing);
+  };
+
+  categorySources.set("boot", new Set(["builtin"]));
+
   for (const category of DEFAULT_DURABLE_CATEGORIES) {
-    folders.add(category);
+    addCategory(category, "builtin");
   }
   for (const category of DEFAULT_SOURCE_CATEGORIES) {
-    folders.add(category);
+    addCategory(category, "builtin");
   }
 
   if (Array.isArray((pluginConfig as { memoryOverlayFolders?: unknown }).memoryOverlayFolders)) {
     const configured = (pluginConfig as { memoryOverlayFolders?: unknown[] }).memoryOverlayFolders ?? [];
     for (const value of configured) {
       if (typeof value !== "string") continue;
-      const folder = normalizeRelPath(value).split("/")[0] ?? "";
-      if (isSafeCategoryName(folder)) {
-        folders.add(folder);
-      }
+      addCategory(value, "plugin");
     }
   }
 
@@ -174,10 +188,7 @@ function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVault
         if (!Array.isArray(candidate)) continue;
         for (const item of candidate) {
           if (typeof item !== "string") continue;
-          const folder = normalizeRelPath(item).split("/")[0] ?? "";
-          if (isSafeCategoryName(folder)) {
-            folders.add(folder);
-          }
+          addCategory(item, ".clawvault.json");
         }
       }
     } catch {
@@ -185,7 +196,100 @@ function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVault
     }
   }
 
+  return [...categorySources.entries()]
+    .map(([category, sources]) => {
+      const layer = category === "boot"
+        ? "boot"
+        : inferLayerAndCategory(`${category}/_`).layer;
+      return {
+        category,
+        layer,
+        readEnabled: category === "boot" || categorySources.has(category),
+        sources: [...sources].sort()
+      } satisfies CategoryInventoryEntry;
+    })
+    .sort((a, b) => a.category.localeCompare(b.category));
+}
+
+function getConfiguredCategoryFolders(vaultPath: string, pluginConfig: ClawVaultPluginConfig): Set<string> {
+  const folders = new Set<string>();
+  for (const entry of collectCategoryInventory(vaultPath, pluginConfig)) {
+    if (entry.category === "boot") continue;
+    if (entry.readEnabled) {
+      folders.add(entry.category);
+    }
+  }
+
   return folders;
+}
+
+function classifyMemoryTarget(
+  vaultPath: string,
+  pluginConfig: ClawVaultPluginConfig,
+  params: { relPath?: string; category?: string }
+): {
+  ok: boolean;
+  input: { relPath?: string; category?: string };
+  resolved?: {
+    relPath?: string;
+    layer: MemoryLayer;
+    category: string;
+    readEnabled: boolean;
+    provenance: MemoryProvenance;
+  };
+  error?: string;
+} {
+  const normalizedRelPath = typeof params.relPath === "string" ? normalizeRelPath(params.relPath) : "";
+  if (normalizedRelPath) {
+    try {
+      const resolved = toSafeMemoryPath(vaultPath, normalizedRelPath, pluginConfig);
+      return {
+        ok: true,
+        input: { relPath: normalizedRelPath },
+        resolved: {
+          relPath: resolved.metadata.relPath,
+          layer: resolved.metadata.layer,
+          category: resolved.metadata.category,
+          readEnabled: true,
+          provenance: resolved.metadata.provenance
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        input: { relPath: normalizedRelPath },
+        error: error instanceof Error ? error.message : "Invalid memory path"
+      };
+    }
+  }
+
+  const normalizedCategory = typeof params.category === "string"
+    ? normalizeRelPath(params.category).split("/")[0] ?? ""
+    : "";
+  if (!normalizedCategory || !isSafeCategoryName(normalizedCategory)) {
+    return {
+      ok: false,
+      input: { category: normalizedCategory || undefined },
+      error: "category must be a safe top-level folder name"
+    };
+  }
+
+  const safeRoots = getConfiguredCategoryFolders(vaultPath, pluginConfig);
+  const readEnabled = safeRoots.has(normalizedCategory);
+  const inferred = inferLayerAndCategory(`${normalizedCategory}/_`);
+  return {
+    ok: true,
+    input: { category: normalizedCategory },
+    resolved: {
+      layer: inferred.layer,
+      category: inferred.category,
+      readEnabled,
+      provenance: {
+        source: "clawvault",
+        relPath: normalizedCategory
+      }
+    }
+  };
 }
 
 function toSafeMemoryPath(
@@ -496,6 +600,94 @@ export function createMemoryGetToolFactory(memoryManager: MemorySearchManager): 
     return {
       name: "memory_get",
       description: "Read a specific memory file or line range from ClawVault.",
+      inputSchema,
+      input_schema: inputSchema,
+      parameters: inputSchema,
+      execute,
+      run: execute,
+      handler: execute
+    };
+  };
+}
+
+export function createMemoryCategoriesToolFactory(
+  options: Pick<ClawVaultMemoryManagerOptions, "pluginConfig" | "workspaceDir" | "defaultAgentId">
+): () => Record<string, unknown> {
+  return () => {
+    const inputSchema = buildToolSchema({
+      sessionKey: {
+        type: "string",
+        description: "Optional OpenClaw session key for agent-scoped vault resolution."
+      }
+    });
+
+    const execute = async (input: Record<string, unknown>) => {
+      const sessionKey = typeof input.sessionKey === "string" ? input.sessionKey : undefined;
+      const vaultPath = resolveManagerVaultPath(options, sessionKey);
+      if (!vaultPath) {
+        return {
+          boot: { category: "boot", layer: "boot", readEnabled: false, sources: ["builtin"] },
+          categories: [] as CategoryInventoryEntry[]
+        };
+      }
+      const categories = collectCategoryInventory(vaultPath, options.pluginConfig);
+      return {
+        boot: categories.find((entry) => entry.category === "boot"),
+        categories
+      };
+    };
+
+    return {
+      name: "memory_categories",
+      description: "Return normalized memory category inventory with layer and read access metadata.",
+      inputSchema,
+      input_schema: inputSchema,
+      parameters: inputSchema,
+      execute,
+      run: execute,
+      handler: execute
+    };
+  };
+}
+
+export function createMemoryClassifyToolFactory(
+  options: Pick<ClawVaultMemoryManagerOptions, "pluginConfig" | "workspaceDir" | "defaultAgentId">
+): () => Record<string, unknown> {
+  return () => {
+    const inputSchema = buildToolSchema({
+      relPath: {
+        type: "string",
+        description: "Relative memory path to classify using retrieval-safe path rules."
+      },
+      category: {
+        type: "string",
+        description: "Top-level category hint when no specific path is available."
+      },
+      sessionKey: {
+        type: "string",
+        description: "Optional OpenClaw session key for agent-scoped vault resolution."
+      }
+    });
+
+    const execute = async (input: Record<string, unknown>) => {
+      const sessionKey = typeof input.sessionKey === "string" ? input.sessionKey : undefined;
+      const vaultPath = resolveManagerVaultPath(options, sessionKey);
+      const relPath = typeof input.relPath === "string" ? input.relPath : undefined;
+      const category = typeof input.category === "string" ? input.category : undefined;
+
+      if (!vaultPath) {
+        return {
+          ok: false,
+          input: { relPath, category },
+          error: "Vault not configured"
+        };
+      }
+      return classifyMemoryTarget(vaultPath, options.pluginConfig, { relPath, category });
+    };
+
+    return {
+      name: "memory_classify",
+      description: "Classify a memory path/category into boot/vault/source using retrieval-identical semantics.",
       inputSchema,
       input_schema: inputSchema,
       parameters: inputSchema,
