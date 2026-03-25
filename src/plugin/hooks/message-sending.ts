@@ -24,7 +24,7 @@ export function createMessageSendingHandler(
   ctx: PluginHookMessageContext
 ) => Promise<PluginHookMessageSendingResult | void> {
   return async (event, _ctx) => {
-    const filterEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableMessageSendingFilter", true);
+    const filterEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableMessageSendingFilter", false);
     if (!filterEnabled) {
       return;
     }
