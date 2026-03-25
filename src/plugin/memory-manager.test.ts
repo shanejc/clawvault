@@ -8,6 +8,12 @@ import {
   createMemoryCategoriesToolFactory,
   createMemoryClassifyToolFactory
 } from "./memory-manager.js";
+import {
+  createMemoryCaptureSourceToolFactory,
+  createMemoryUpdateToolFactory,
+  createMemoryWriteBootToolFactory,
+  createMemoryWriteVaultToolFactory
+} from "./memory-write-tools.js";
 
 const tempDirs: string[] = [];
 
@@ -208,5 +214,59 @@ describe("ClawVaultMemoryManager", () => {
     });
     expect(hintClassified.ok).toBe(true);
     expect((hintClassified.resolved as { readEnabled: boolean }).readEnabled).toBe(true);
+  });
+
+  it("writes vault, boot, source, and update tools with compatible handler fields", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({ categories: ["projects"] }, null, 2),
+      "utf-8"
+    );
+    const writeOptions = {
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    };
+    const writeVaultTool = createMemoryWriteVaultToolFactory(writeOptions)();
+    const writeBootTool = createMemoryWriteBootToolFactory(writeOptions)();
+    const captureTool = createMemoryCaptureSourceToolFactory(writeOptions)();
+    const updateTool = createMemoryUpdateToolFactory(writeOptions, "memory_patch")();
+
+    for (const tool of [writeVaultTool, writeBootTool, captureTool, updateTool]) {
+      expect(tool.inputSchema).toBeDefined();
+      expect(tool.input_schema).toBe(tool.inputSchema);
+      expect(tool.parameters).toBe(tool.inputSchema);
+      expect(tool.execute).toBe(tool.run);
+      expect(tool.execute).toBe(tool.handler);
+    }
+
+    const writeVaultResult = await (writeVaultTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "projects/roadmap.md",
+      content: "# Roadmap"
+    });
+    expect(writeVaultResult.ok).toBe(true);
+    expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("# Roadmap");
+
+    const writeBootResult = await (writeBootTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      content: "# Boot Memory"
+    });
+    expect(writeBootResult.ok).toBe(true);
+    expect(fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8")).toContain("# Boot Memory");
+
+    const captureResult = await (captureTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "captures/session-1.md",
+      content: "Captured evidence"
+    });
+    expect(captureResult.ok).toBe(true);
+    expect(fs.readFileSync(path.join(vaultPath, "captures", "session-1.md"), "utf-8")).toContain("Captured evidence");
+
+    const patchResult = await (updateTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "projects/roadmap.md",
+      content: "## Updated",
+      startLine: 1,
+      endLine: 1
+    });
+    expect(patchResult.ok).toBe(true);
+    expect(fs.readFileSync(path.join(vaultPath, "projects", "roadmap.md"), "utf-8")).toContain("## Updated");
   });
 });
