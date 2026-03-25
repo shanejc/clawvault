@@ -42,9 +42,9 @@ export function createBeforePromptBuildHandler(
     const prependSections: string[] = [];
     const appendSections: string[] = [];
 
-    const recallEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableBeforePromptRecall", true);
-    const protocolEnabled = isFeatureEnabled(dependencies.pluginConfig, "enforceCommunicationProtocol", true);
-    const contextInjectionEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableSessionContextInjection", true);
+    const recallEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableBeforePromptRecall", false);
+    const protocolEnabled = isFeatureEnabled(dependencies.pluginConfig, "enforceCommunicationProtocol", false);
+    const contextInjectionEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableSessionContextInjection", false);
 
     if (recallEnabled) {
       prependSections.push(MEMORY_RECALL_MANDATE);

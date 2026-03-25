@@ -9,6 +9,8 @@ const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 export type ClawVaultContextProfile = "default" | "planning" | "incident" | "handoff" | "auto";
 
 export interface ClawVaultPluginConfig {
+  automationMode?: boolean;
+  automationPreset?: "thin" | "hybrid" | "legacy" | "automation";
   vaultPath?: string;
   agentVaults?: Record<string, string>;
   allowClawvaultExec?: boolean;
