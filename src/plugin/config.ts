@@ -2,6 +2,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { OpenClawPluginApi, PluginHookAgentContext } from "./openclaw-types.js";
+import {
+  CLAWVAULT_PACK_NAMES,
+  PACK_FEATURE_KEYS,
+  PACK_PRESET_TOGGLES,
+  isClawVaultPackPreset
+} from "./packs.js";
+import type { ClawVaultAutomationPack, ClawVaultPackPreset, ClawVaultPackToggleMap } from "./packs.js";
 
 const SESSION_KEY_RE = /^agent:[a-zA-Z0-9_-]+:[a-zA-Z0-9:_-]+$/;
 const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
@@ -11,6 +18,8 @@ export type ClawVaultContextProfile = "default" | "planning" | "incident" | "han
 export interface ClawVaultPluginConfig {
   automationMode?: boolean;
   automationPreset?: "thin" | "hybrid" | "legacy" | "automation";
+  packPreset?: ClawVaultPackPreset;
+  packToggles?: ClawVaultPackToggleMap;
   vaultPath?: string;
   agentVaults?: Record<string, string>;
   allowClawvaultExec?: boolean;
@@ -48,8 +57,43 @@ export function readPluginConfig(api: Pick<OpenClawPluginApi, "pluginConfig">): 
   return api.pluginConfig as ClawVaultPluginConfig;
 }
 
+
+function isPackFeatureKey(key: keyof ClawVaultPluginConfig): boolean {
+  return CLAWVAULT_PACK_NAMES.some((pack) => PACK_FEATURE_KEYS[pack].includes(key));
+}
+
+function getEffectivePackPreset(pluginConfig: ClawVaultPluginConfig): ClawVaultPackPreset | null {
+  const preset = pluginConfig.packPreset ?? pluginConfig.automationPreset;
+  if (!isClawVaultPackPreset(preset)) return null;
+  return preset;
+}
+
+function hasLegacyPackOptIn(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
+  return PACK_FEATURE_KEYS[pack].some((featureKey) => pluginConfig[featureKey as keyof ClawVaultPluginConfig] === true);
+}
+
+export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
+  const explicitToggle = pluginConfig.packToggles?.[pack];
+  if (typeof explicitToggle === "boolean") {
+    return explicitToggle;
+  }
+
+  if (pluginConfig.automationMode === true) {
+    return true;
+  }
+
+  if (hasLegacyPackOptIn(pluginConfig, pack)) {
+    return true;
+  }
+
+  const preset = getEffectivePackPreset(pluginConfig);
+  if (!preset) return false;
+
+  return PACK_PRESET_TOGGLES[preset][pack] === true;
+}
+
 export function isOptInEnabled(pluginConfig: ClawVaultPluginConfig, ...keys: Array<keyof ClawVaultPluginConfig>): boolean {
-  return keys.some((key) => pluginConfig[key] === true);
+  return keys.some((key) => isFeatureEnabled(pluginConfig, key, false));
 }
 
 export function isFeatureEnabled(
@@ -59,6 +103,14 @@ export function isFeatureEnabled(
 ): boolean {
   const value = pluginConfig[key];
   if (typeof value === "boolean") return value;
+
+  if (isPackFeatureKey(key)) {
+    const ownerPack = CLAWVAULT_PACK_NAMES.find((pack) => PACK_FEATURE_KEYS[pack].includes(key));
+    if (ownerPack) {
+      return isPackEnabled(pluginConfig, ownerPack);
+    }
+  }
+
   return defaultValue;
 }
 
