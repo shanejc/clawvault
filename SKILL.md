@@ -15,14 +15,14 @@ metadata: {"openclaw":{"emoji":"🐘","requires":{"bins":["clawvault","qmd"],"en
 
 An elephant never forgets. Structured memory for OpenClaw agents.
 
-> **Built for [OpenClaw](https://openclaw.ai)**. Canonical install: npm CLI + hook install + hook enable.
+> **Built for [OpenClaw](https://openclaw.ai)**. Canonical install: `npm install clawvault`, then configure `plugins.entries.clawvault` and `plugins.slots.memory` in openclaw.json.
 
 ## Security & Transparency
 
 **What this skill does:**
 - Reads/writes markdown files in your vault directory (`CLAWVAULT_PATH` or auto-discovered)
 - `repair-session` reads and modifies OpenClaw session transcripts (`~/.openclaw/agents/`) — creates backups before writing
-- Provides an OpenClaw **hook pack** (`hooks/clawvault/handler.js`) with lifecycle events (`gateway:startup`, `gateway:heartbeat`, `command:new`, `session:start`, `compaction:memoryFlush`, `cron.weekly`). Hook is opt-in and must be installed/enabled.
+- Provides an OpenClaw **plugin** (`openclaw.plugin.json`) with lifecycle events (`gateway:startup`, `gateway:heartbeat`, `command:new`, `session:start`, `compaction:memoryFlush`, `cron.weekly`). Plugin is opt-in and must be configured in openclaw.json.
 - `observe --compress` makes LLM API calls (Gemini Flash by default) to compress session transcripts into observations
 
 **Environment variables used:**
@@ -34,23 +34,28 @@ An elephant never forgets. Structured memory for OpenClaw agents.
 
 **This is a full CLI tool, not instruction-only.** It writes files, registers hooks, and runs code.
 
-**Auditability:** the published ClawHub skill bundle includes `SKILL.md`, `HOOK.md`, and `hooks/clawvault/handler.js` so users can inspect hook behavior before enabling it.
+**Auditability:** the published package includes `SKILL.md` and `openclaw.plugin.json` so users can inspect plugin behavior before enabling it.
 
 ## Install (Canonical)
 
 ```bash
-npm install -g clawvault
-openclaw hooks install clawvault
-openclaw hooks enable clawvault
+# Install ClawVault
+npm install clawvault
 
-# Verify and reload
-openclaw hooks list --verbose
-openclaw hooks info clawvault
-openclaw hooks check
-# restart gateway process
+# Register plugin and memory slot
+openclaw config set plugins.entries.clawvault.package clawvault
+openclaw config set plugins.slots.memory clawvault
+
+# Configure vault path
+openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
+
+# Verify
+clawvault compat
+
+# Restart gateway process
 ```
 
-`clawhub install clawvault` can install skill guidance, but does not replace explicit hook pack installation.
+`clawhub install clawvault` can install skill guidance, but does not replace explicit plugin configuration.
 
 ### Recommended Safe Install Flow
 
@@ -58,20 +63,21 @@ openclaw hooks check
 # 1) Review package metadata before install
 npm view clawvault version dist.integrity dist.tarball repository.url
 
-# 2) Install CLI + qmd dependency
-npm install -g clawvault@latest
+# 2) Install ClawVault + optional qmd dependency
+npm install clawvault@latest
 npm install -g github:tobi/qmd
 
-# 3) Install hook pack, but DO NOT enable yet
-openclaw hooks install clawvault
+# 3) Register plugin in openclaw.json
+openclaw config set plugins.entries.clawvault.package clawvault
+openclaw config set plugins.slots.memory clawvault
 
-# 4) Review hook source locally before enabling
-node -e "const fs=require('fs');const p='hooks/clawvault/handler.js';console.log(fs.existsSync(p)?p:'hook file not found in current directory')"
-openclaw hooks info clawvault
+# 4) Review plugin manifest before enabling features
+cat node_modules/clawvault/openclaw.plugin.json
 
-# 5) Enable only after review
-openclaw hooks enable clawvault
-openclaw hooks check
+# 5) Enable features after review
+openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
+openclaw config set plugins.entries.clawvault.config.enableStartupRecovery true
+clawvault compat
 ```
 
 ## Setup
@@ -332,7 +338,7 @@ Backups are created automatically (use `--no-backup` to skip).
 - **Inbox backlog warning** — process or archive inbox items
 - **"unexpected tool_use_id" error** — run `clawvault repair-session`
 - **OpenClaw integration drift** — run `clawvault compat`
-- **Hook enable fails / hook not found** — run `openclaw hooks install clawvault`, then `openclaw hooks enable clawvault`, restart gateway, and verify via `openclaw hooks list --verbose`
+- **Plugin not active** — verify `openclaw config get plugins.entries.clawvault`, ensure `plugins.slots.memory` is set to `clawvault`, and restart the gateway
 - **Graph out of date** — run `clawvault graph --refresh`
 - **Wrong context for task** — try `clawvault context --profile incident` or `--profile planning`
 

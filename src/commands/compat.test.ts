@@ -22,7 +22,7 @@ function writeProjectFixture(root: string): void {
     path.join(root, 'package.json'),
     JSON.stringify({
       name: 'clawvault',
-      openclaw: { hooks: ['./hooks/clawvault'] }
+      openclaw: { hooks: ['./hooks/clawvault'], plugin: './openclaw.plugin.json' }
     }),
     'utf-8'
   );
@@ -50,7 +50,7 @@ function writeProjectFixture(root: string): void {
     'utf-8'
   );
   fs.writeFileSync(
-    path.join(root, 'hooks', 'clawvault', 'openclaw.plugin.json'),
+    path.join(root, 'openclaw.plugin.json'),
     JSON.stringify({
       id: 'clawvault',
       name: 'ClawVault',

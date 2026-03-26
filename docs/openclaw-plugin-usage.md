@@ -7,10 +7,21 @@ This guide covers best practices for using ClawVault as an OpenClaw plugin, incl
 See the [README](../README.md#openclaw-integration) for canonical installation steps:
 
 ```bash
-npm install -g clawvault
-openclaw hooks install clawvault
-openclaw hooks enable clawvault
+# Install ClawVault
+npm install clawvault
+
+# Register plugin and memory slot in openclaw.json
+openclaw config set plugins.entries.clawvault.package clawvault
+openclaw config set plugins.slots.memory clawvault
+
+# Configure vault path
+openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
+
+# Verify
+clawvault compat
 ```
+
+> **Legacy note:** The older `openclaw hooks install` / `openclaw hooks enable` flow is no longer recommended. Use the plugin model above.
 
 ## MEMORY.md vs Vault: Understanding the Relationship
 
@@ -202,9 +213,10 @@ If MEMORY.md and vault conflict, instruct the agent to trust `clawvault wake` ou
 
 ### Context injection not working
 
-1. Verify hook is enabled: `openclaw hooks list --verbose`
-2. Check vault path: `openclaw config get plugins.entries.clawvault`
-3. Run compatibility check: `clawvault compat`
+1. Verify plugin is registered: `openclaw config get plugins.entries.clawvault`
+2. Verify memory slot: `openclaw config get plugins.slots.memory`
+3. Check vault path: `openclaw config get plugins.entries.clawvault.config.vaultPath`
+4. Run compatibility check: `clawvault compat`
 
 ## Related Documentation
 

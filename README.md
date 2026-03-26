@@ -267,23 +267,29 @@ clawvault setup --theme neural --canvas --bases
 
 ## OpenClaw Integration
 
-For hook-based lifecycle integration with OpenClaw:
+ClawVault integrates with OpenClaw as a plugin. Install the npm package, then configure it in your OpenClaw config:
 
 ```bash
-# Install and enable hook pack
-openclaw hooks install clawvault
-openclaw hooks enable clawvault
+# 1. Install the ClawVault package
+npm install clawvault
 
-# Verify
-openclaw hooks list --verbose
-openclaw hooks check
+# 2. Register the plugin and memory slot in openclaw.json
+openclaw config set plugins.entries.clawvault.package clawvault
+openclaw config set plugins.slots.memory clawvault
+
+# 3. Configure your vault path
+openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
+
+# 4. Verify
 clawvault compat
 ```
 
-The hook automatically:
+The plugin automatically:
 - Detects context death and injects recovery alerts
 - Auto-checkpoints before session resets
 - Provides `--profile auto` for context queries
+
+> **Legacy note:** The older `openclaw hooks install` / `openclaw hooks enable` flow is no longer the recommended path. Use the plugin model above.
 
 ### MEMORY.md vs Vault
 
@@ -351,27 +357,29 @@ clawvault compat
 
 ## OpenClaw Setup (Canonical)
 
-If you want hook-based lifecycle integration, use this sequence:
+ClawVault integrates with OpenClaw as a plugin. Use this sequence:
 
 ```bash
-# Install CLI
-npm install -g clawvault
+# Install ClawVault
+npm install clawvault
 
-# Install and enable hook pack
-openclaw hooks install clawvault
-openclaw hooks enable clawvault
+# Register plugin and memory slot
+openclaw config set plugins.entries.clawvault.package clawvault
+openclaw config set plugins.slots.memory clawvault
+
+# Configure vault path and desired features
+openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
+openclaw config set plugins.entries.clawvault.config.enableStartupRecovery true
+openclaw config set plugins.entries.clawvault.config.enableSessionContextInjection true
 
 # Verify
-openclaw hooks list --verbose
-openclaw hooks info clawvault
-openclaw hooks check
 clawvault compat
 ```
 
 Important:
 
-- `clawhub install clawvault` installs skill guidance, but does not replace hook-pack installation.
-- After enabling hooks, restart the OpenClaw gateway process so hook registration reloads.
+- `clawhub install clawvault` installs skill guidance, but does not replace plugin configuration.
+- After changing plugin config, restart the OpenClaw gateway process so plugin registration reloads.
 
 ## Minimal AGENTS.md Additions
 
@@ -488,10 +496,10 @@ vault/
 - `qmd` fallback errors:
   - `qmd` is optional; in-process BM25 search is available without it
   - if you want fallback compatibility, ensure `qmd --version` works in the same shell
-- Hook/plugin not active in OpenClaw:
-  - run `openclaw hooks install clawvault`
-  - run `openclaw hooks enable clawvault`
-  - verify with `openclaw hooks list --verbose`
+- Plugin not active in OpenClaw:
+  - run `openclaw config set plugins.entries.clawvault.package clawvault`
+  - run `openclaw config set plugins.slots.memory clawvault`
+  - restart the OpenClaw gateway process
 - OpenClaw integration drift:
   - run `clawvault compat`
 - Session transcript corruption:

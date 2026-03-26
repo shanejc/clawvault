@@ -245,14 +245,30 @@ function checkHookHandlerSafety(options: CompatOptions): CompatCheck {
   return { label: 'hook handler safety', status: 'ok' };
 }
 
+function resolvePluginManifestPath(options: CompatOptions): string {
+  const packageRaw = readOptionalFile(resolveProjectFile('package.json', options.baseDir));
+  if (packageRaw) {
+    try {
+      const parsed = JSON.parse(packageRaw) as { openclaw?: { plugin?: string } };
+      if (typeof parsed.openclaw?.plugin === 'string') {
+        return parsed.openclaw.plugin.replace(/^\.\//, '');
+      }
+    } catch {
+      // fall through to default
+    }
+  }
+  return 'openclaw.plugin.json';
+}
+
 function checkPluginManifest(options: CompatOptions): CompatCheck {
-  const manifestRaw = readOptionalFile(resolveProjectFile('hooks/clawvault/openclaw.plugin.json', options.baseDir));
+  const manifestRelPath = resolvePluginManifestPath(options);
+  const manifestRaw = readOptionalFile(resolveProjectFile(manifestRelPath, options.baseDir));
   if (!manifestRaw) {
     return {
       label: 'plugin manifest',
       status: 'error',
-      detail: 'hooks/clawvault/openclaw.plugin.json not found',
-      hint: 'Add openclaw.plugin.json to hooks/clawvault/ for config schema registration.'
+      detail: `${manifestRelPath} not found`,
+      hint: 'Ensure openclaw.plugin.json exists at the path declared in package.json openclaw.plugin.'
     };
   }
 
