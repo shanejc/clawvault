@@ -340,30 +340,38 @@ function getSectionBody(markdown: string, section: { startLine: number; endLine:
   return lines.slice(section.startLine, section.endLine).join("\n");
 }
 
-function buildDefaultBootMemoryTemplate(): string {
+function detectLineEnding(markdown: string): "\n" | "\r\n" {
+  return markdown.includes("\r\n") ? "\r\n" : "\n";
+}
+
+function buildDefaultBootMemoryTemplate(lineEnding: "\n" | "\r\n" = "\n"): string {
   const lines = ["# Boot Memory", ""];
   for (const section of DEFAULT_BOOT_MEMORY_SECTIONS) {
     lines.push(`## ${section}`, "");
   }
-  return `${lines.join("\n").replace(/\n+$/g, "")}\n`;
+  return `${lines.join(lineEnding).replace(/(?:\r?\n)+$/g, "")}${lineEnding}`;
 }
 
 function appendMissingBootSections(markdown: string): string {
-  const normalized = markdown.replace(/\r\n/g, "\n");
-  const headings = parseSectionRanges(normalized);
+  const lineEnding = detectLineEnding(markdown);
+  if (!markdown.trim()) {
+    return buildDefaultBootMemoryTemplate(lineEnding);
+  }
+
+  const headings = parseSectionRanges(markdown);
   const existing = new Set(headings.map((section) => section.name.trim().toLowerCase()));
   const missing = DEFAULT_BOOT_MEMORY_SECTIONS
     .filter((section) => !existing.has(section.toLowerCase()));
   if (missing.length === 0) {
-    return normalized;
+    return markdown;
   }
 
-  const prefix = normalized.replace(/\n+$/g, "");
+  const prefix = markdown.replace(/(?:\r?\n)+$/g, "");
   const lines = [prefix];
   for (const section of missing) {
     lines.push("", `## ${section}`, "");
   }
-  return `${lines.join("\n").replace(/\n+$/g, "")}\n`;
+  return `${lines.join(lineEnding).replace(/(?:\r?\n)+$/g, "")}${lineEnding}`;
 }
 
 function isMinimallyStructuredBootMemory(markdown: string): boolean {
@@ -372,9 +380,7 @@ function isMinimallyStructuredBootMemory(markdown: string): boolean {
   if (levelTwoCount === 0) {
     return true;
   }
-  const names = new Set(sections.map((section) => section.name.trim().toLowerCase()));
-  const defaultCount = DEFAULT_BOOT_MEMORY_SECTIONS.filter((section) => names.has(section.toLowerCase())).length;
-  return defaultCount < 2;
+  return levelTwoCount === 1;
 }
 
 function ensureMemoryBootTarget(

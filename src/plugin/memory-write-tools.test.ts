@@ -186,4 +186,25 @@ describe("memory_write_boot tool", () => {
     expect(afterThird.match(/## Identity/g)).toHaveLength(1);
     expect(afterThird).toContain("## Scratchpad\n- untouched");
   });
+
+  it("avoids default schema injection for non-minimal files", async () => {
+    const vaultPath = createVaultFixture("# Boot Memory\n\n## Goals\n- Keep focus\n\n## Scratchpad\n- existing note\n");
+    vaults.push(vaultPath);
+    const tool = createMemoryWriteBootToolFactory({ pluginConfig: { vaultPath } })() as {
+      execute: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    };
+
+    const result = await tool.execute({
+      mode: "replace_section",
+      section: "Goals",
+      content: "- Updated focus"
+    });
+
+    expect(result.ok).toBe(true);
+    const updated = fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8");
+    expect(updated).not.toContain("## Identity");
+    expect(updated).not.toContain("## Key Decisions");
+    expect(updated).toContain("## Goals\n- Updated focus");
+    expect(updated).toContain("## Scratchpad\n- existing note");
+  });
 });
