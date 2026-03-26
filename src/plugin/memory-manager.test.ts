@@ -216,6 +216,166 @@ describe("ClawVaultMemoryManager", () => {
     expect((hintClassified.resolved as { readEnabled: boolean }).readEnabled).toBe(true);
   });
 
+  it("orders retrieval results with durable notes as first-class objects and metadata intact", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.mkdirSync(path.join(vaultPath, "projects"), { recursive: true });
+    fs.mkdirSync(path.join(vaultPath, "memory"), { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), JSON.stringify({ categories: ["projects"] }), "utf-8");
+    fs.writeFileSync(path.join(vaultPath, "projects", "roadmap.md"), "# Roadmap\nDurable plan\n", "utf-8");
+    fs.writeFileSync(path.join(vaultPath, "memory", "timeline.md"), "# Timeline\nCaptured source\n", "utf-8");
+
+    vi.spyOn(ClawVault.prototype, "load").mockResolvedValue(undefined);
+    vi.spyOn(ClawVault.prototype, "find").mockResolvedValue([
+      {
+        document: {
+          id: "memory/timeline",
+          path: path.join(vaultPath, "memory", "timeline.md"),
+          category: "memory",
+          title: "timeline",
+          content: "Captured source",
+          frontmatter: {},
+          links: [],
+          tags: [],
+          modified: new Date()
+        },
+        score: 0.85,
+        snippet: "Captured source",
+        matchedTerms: ["captured"]
+      },
+      {
+        document: {
+          id: "projects/roadmap",
+          path: path.join(vaultPath, "projects", "roadmap.md"),
+          category: "projects",
+          title: "roadmap",
+          content: "Durable plan",
+          frontmatter: {},
+          links: [],
+          tags: [],
+          modified: new Date()
+        },
+        score: 0.85,
+        snippet: "Durable plan",
+        matchedTerms: ["plan"]
+      }
+    ]);
+
+    const manager = new ClawVaultMemoryManager({
+      pluginConfig: { vaultPath }
+    });
+
+    const results = await manager.search("plan", { maxResults: 5 });
+    expect(results).toHaveLength(2);
+    expect(results[0]?.path).toBe("projects/roadmap.md");
+    expect(results[0]?.layer).toBe("vault");
+    expect(results[0]?.category).toBe("projects");
+    expect(results[0]?.provenance).toMatchObject({
+      source: "clawvault",
+      relPath: "projects/roadmap.md"
+    });
+    expect(results[1]?.path).toBe("memory/timeline.md");
+    expect(results[1]?.layer).toBe("source");
+  });
+
+  it("does not promote source-only capture defaults into durable categories", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.mkdirSync(path.join(vaultPath, "projects"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({ categories: ["projects"] }, null, 2),
+      "utf-8"
+    );
+
+    const captureTool = createMemoryCaptureSourceToolFactory({
+      pluginConfig: { vaultPath },
+      defaultAgentId: "main"
+    })();
+    const execute = captureTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+    const missingTarget = await execute({
+      payload: "captured by default",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture-default",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(missingTarget.ok).toBe(false);
+    expect(String(missingTarget.error)).toContain("category must be a safe top-level folder name");
+
+    const explicitSourceWrite = await execute({
+      category: "captures",
+      slug: "session-defaults",
+      payload: "captured explicitly",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture-default-explicit",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(explicitSourceWrite.ok).toBe(true);
+    expect(explicitSourceWrite.layer).toBe("source");
+    expect(String(explicitSourceWrite.path)).toBe("captures/session-defaults.md");
+
+    const forcedDurableCategory = await execute({
+      category: "projects",
+      payload: "should fail",
+      provenance: {
+        sourceType: "timeline",
+        originRef: "test://capture-forced-durable",
+        timestamp: "2026-03-25T00:00:00.000Z"
+      }
+    });
+    expect(forcedDurableCategory.ok).toBe(false);
+    expect(String(forcedDurableCategory.error)).toContain("memory_write path not allowed for layer vault");
+  });
+
+  it("resolves durable categories from overlay config safely", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({
+        categories: ["runbooks", "../unsafe", "projects"],
+        overlayCategories: ["people/team", "captures/raw"]
+      }, null, 2),
+      "utf-8"
+    );
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["playbooks", "projects/2026", "../drop", "memory/raw"]
+      },
+      defaultAgentId: "main"
+    })();
+    const classifyTool = createMemoryClassifyToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["playbooks"]
+      },
+      defaultAgentId: "main"
+    })();
+    const categoryResult = await (categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = categoryResult.categories as Array<{ category: string; layer: string }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry.layer]));
+
+    expect(byCategory.get("playbooks")).toBe("vault");
+    expect(byCategory.get("runbooks")).toBe("vault");
+    expect(byCategory.get("projects")).toBe("vault");
+    expect(byCategory.get("people")).toBe("vault");
+    expect(byCategory.get("memory")).toBe("source");
+    expect(byCategory.has("unsafe")).toBe(false);
+    expect(byCategory.has("drop")).toBe(false);
+
+    const classified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      category: "playbooks"
+    });
+    expect(classified.ok).toBe(true);
+    expect((classified.resolved as { layer: string; category: string; readEnabled: boolean }).layer).toBe("vault");
+    expect((classified.resolved as { layer: string; category: string; readEnabled: boolean }).category).toBe("playbooks");
+    expect((classified.resolved as { layer: string; category: string; readEnabled: boolean }).readEnabled).toBe(true);
+  });
+
   it("writes vault, boot, source, and update tools with compatible handler fields", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
