@@ -377,10 +377,7 @@ function appendMissingBootSections(markdown: string): string {
 function isMinimallyStructuredBootMemory(markdown: string): boolean {
   const sections = parseSectionRanges(markdown);
   const levelTwoCount = sections.filter((section) => section.level === 2).length;
-  if (levelTwoCount === 0) {
-    return true;
-  }
-  return levelTwoCount === 1;
+  return levelTwoCount === 0;
 }
 
 function ensureMemoryBootTarget(
