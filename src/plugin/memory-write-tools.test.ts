@@ -131,7 +131,7 @@ describe("memory_write_boot tool", () => {
   });
 
   it("auto-bootstraps default schema for minimally structured files while preserving comments and custom sections", async () => {
-    const vaultPath = createVaultFixture("# Boot Memory\n\n<!-- keep me -->\n\nAd hoc context line.\n");
+    const vaultPath = createVaultFixture("# Boot Memory\n\n<!-- keep me -->\n\n## Notes\n- ad hoc\n");
     vaults.push(vaultPath);
     const tool = createMemoryWriteBootToolFactory({ pluginConfig: { vaultPath } })() as {
       execute: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -146,7 +146,7 @@ describe("memory_write_boot tool", () => {
     expect(result.ok).toBe(true);
     const updated = fs.readFileSync(path.join(vaultPath, "MEMORY.md"), "utf-8");
     expect(updated).toContain("<!-- keep me -->");
-    expect(updated).toContain("Ad hoc context line.");
+    expect(updated).toContain("## Notes\n- ad hoc");
     expect(updated).toContain("## Identity");
     expect(updated).toContain("## Current Focus\n- Ship idempotent updates");
     expect(updated).toContain("## Quick Links");
