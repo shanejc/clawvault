@@ -376,7 +376,7 @@ describe("ClawVaultMemoryManager", () => {
     expect((classified.resolved as { layer: string; category: string; readEnabled: boolean }).readEnabled).toBe(true);
   });
 
-  it("rejects malformed native category overrides by default while allowing additive custom categories", async () => {
+  it("rejects malformed default category overrides by default while allowing additive custom categories", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
       path.join(vaultPath, ".clawvault.json"),
@@ -405,12 +405,12 @@ describe("ClawVaultMemoryManager", () => {
     expect(byCategory.get("captures")?.sources).not.toContain("plugin");
   });
 
-  it("allows explicit native category override provenance flag", async () => {
+  it("allows explicit default category override provenance flag", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
       path.join(vaultPath, ".clawvault.json"),
       JSON.stringify({
-        allowNativeCategoryOverride: true,
+        allowDefaultCategoryOverride: true,
         overlayCategories: ["people/team", "memory/raw"]
       }, null, 2),
       "utf-8"
@@ -420,7 +420,7 @@ describe("ClawVaultMemoryManager", () => {
       pluginConfig: {
         vaultPath,
         memoryOverlayFolders: ["captures/raw"],
-        allowNativeCategoryOverride: true
+        allowDefaultCategoryOverride: true
       },
       defaultAgentId: "main"
     })();
