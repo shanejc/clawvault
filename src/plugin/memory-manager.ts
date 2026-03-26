@@ -39,6 +39,12 @@ type CategoryInventoryEntry = {
   sources: string[];
 };
 
+const MEMORY_LAYER_PRIORITY: Record<MemoryLayer, number> = {
+  boot: 0,
+  vault: 1,
+  source: 2
+};
+
 export interface ClawVaultMemoryManagerOptions {
   pluginConfig: ClawVaultPluginConfig;
   workspaceDir?: string;
@@ -111,6 +117,19 @@ function mapSearchResult(vaultPath: string, result: SearchResult): MemorySearchR
     },
     citation: `${normalizedRelPath}#L${startLine}-L${endLine}`
   };
+}
+
+function sortSearchResults(results: MemorySearchResult[]): MemorySearchResult[] {
+  return [...results].sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    const layerDelta = MEMORY_LAYER_PRIORITY[left.layer] - MEMORY_LAYER_PRIORITY[right.layer];
+    if (layerDelta !== 0) {
+      return layerDelta;
+    }
+    return left.path.localeCompare(right.path);
+  });
 }
 
 function countMarkdownFiles(root: string): number {
@@ -204,7 +223,7 @@ function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPlug
       return {
         category,
         layer,
-        readEnabled: category === "boot" || categorySources.has(category),
+        readEnabled: category === "boot" || sources.size > 0,
         sources: [...sources].sort()
       } satisfies CategoryInventoryEntry;
     })
@@ -379,7 +398,7 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
         minScore,
         temporalBoost: true
       });
-      return results.map((result) => mapSearchResult(vaultPath, result));
+      return sortSearchResults(results.map((result) => mapSearchResult(vaultPath, result)));
     } catch (error) {
       this.options.logger?.warn(
         `[clawvault] memory_search fallback error: ${error instanceof Error ? error.message : String(error)}`
