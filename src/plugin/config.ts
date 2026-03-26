@@ -44,6 +44,7 @@ export interface ClawVaultPluginConfig {
   enableMessageSendingFilter?: boolean;
   minQuestionRecallScore?: number;
   memoryOverlayFolders?: string[];
+  allowDefaultCategoryOverride?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

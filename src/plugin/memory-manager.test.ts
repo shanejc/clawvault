@@ -376,6 +376,64 @@ describe("ClawVaultMemoryManager", () => {
     expect((classified.resolved as { layer: string; category: string; readEnabled: boolean }).readEnabled).toBe(true);
   });
 
+  it("rejects malformed default category overrides by default while allowing additive custom categories", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({
+        categories: ["playbooks", "projects"],
+        overlayCategories: ["memory/raw", "people/team", "../escape"]
+      }, null, 2),
+      "utf-8"
+    );
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["captures/raw", "incidents"]
+      },
+      defaultAgentId: "main"
+    })();
+    const categoryResult = await (categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = categoryResult.categories as Array<{ category: string; layer: string; sources: string[] }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry]));
+
+    expect(byCategory.get("playbooks")?.layer).toBe("vault");
+    expect(byCategory.get("incidents")?.sources).toContain("plugin");
+    expect(byCategory.get("memory")?.sources).not.toContain(".clawvault.json");
+    expect(byCategory.get("people")?.sources).not.toContain(".clawvault.json");
+    expect(byCategory.get("captures")?.sources).not.toContain("plugin");
+  });
+
+  it("allows explicit default category override provenance flag", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(
+      path.join(vaultPath, ".clawvault.json"),
+      JSON.stringify({
+        allowDefaultCategoryOverride: true,
+        overlayCategories: ["people/team", "memory/raw"]
+      }, null, 2),
+      "utf-8"
+    );
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["captures/raw"],
+        allowDefaultCategoryOverride: true
+      },
+      defaultAgentId: "main"
+    })();
+    const categoryResult = await (categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = categoryResult.categories as Array<{ category: string; layer: string; sources: string[] }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry]));
+
+    expect(byCategory.get("memory")?.layer).toBe("source");
+    expect(byCategory.get("people")?.layer).toBe("vault");
+    expect(byCategory.get("memory")?.sources).toContain(".clawvault.json");
+    expect(byCategory.get("captures")?.sources).toContain("plugin");
+  });
+
   it("writes vault, boot, source, and update tools with compatible handler fields", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
