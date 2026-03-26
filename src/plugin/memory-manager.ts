@@ -39,7 +39,7 @@ type CategoryInventoryEntry = {
   sources: string[];
 };
 
-type CategoryRegistryClass = "native" | "custom";
+type CategoryRegistryClass = "default" | "custom";
 type CategoryRegistryMode = "durable" | "source";
 type CategoryRegistrySource = "builtin" | "plugin" | ".clawvault.json";
 
@@ -48,13 +48,13 @@ type CategoryRegistryEntry = {
   layer: MemoryLayer;
   class: CategoryRegistryClass;
   mode: CategoryRegistryMode;
-  protectedNative: boolean;
+  protectedDefault: boolean;
   sources: Set<string>;
 };
 
 type CategoryRegistry = {
   entries: Map<string, CategoryRegistryEntry>;
-  allowNativeOverride: boolean;
+  allowDefaultOverride: boolean;
 };
 
 const MEMORY_LAYER_PRIORITY: Record<MemoryLayer, number> = {
@@ -101,23 +101,30 @@ function estimateLineRange(content: string, snippet: string): { startLine: numbe
   return { startLine, endLine };
 }
 
-export function inferLayerAndCategory(relPath: string): { layer: MemoryLayer; category: string } {
+export function inferLayerAndCategory(
+  relPath: string,
+  sourceCategories: ReadonlySet<string> = new Set(DEFAULT_SOURCE_CATEGORIES as readonly string[])
+): { layer: MemoryLayer; category: string } {
   if (relPath === "MEMORY.md") {
     return { layer: "boot", category: "boot" };
   }
 
   const category = relPath.split("/")[0] ?? "unknown";
-  if ((DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category)) {
+  if (sourceCategories.has(category)) {
     return { layer: "source", category };
   }
 
   return { layer: "vault", category };
 }
 
-function mapSearchResult(vaultPath: string, result: SearchResult): MemorySearchResult {
+function mapSearchResult(
+  vaultPath: string,
+  result: SearchResult,
+  sourceCategories: ReadonlySet<string>
+): MemorySearchResult {
   const relPath = normalizeRelPath(path.relative(vaultPath, result.document.path));
   const { startLine, endLine } = estimateLineRange(result.document.content, result.snippet);
-  const { layer, category } = inferLayerAndCategory(relPath || path.basename(result.document.path));
+  const { layer, category } = inferLayerAndCategory(relPath || path.basename(result.document.path), sourceCategories);
   const normalizedRelPath = relPath || path.basename(result.document.path);
 
   return {
@@ -184,13 +191,13 @@ function isSafeCategoryName(value: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
 }
 
-function isNativeCategory(category: string): boolean {
+function isDefaultCategory(category: string): boolean {
   return category === "boot"
     || (DEFAULT_DURABLE_CATEGORIES as readonly string[]).includes(category)
     || (DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category);
 }
 
-function isNativeSourceCategory(category: string): boolean {
+function isDefaultSourceCategory(category: string): boolean {
   return (DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category);
 }
 
@@ -204,17 +211,17 @@ function readCategoryRegistryConfig(vaultPath: string): Record<string, unknown> 
   }
 }
 
-function isNativeOverrideEnabled(pluginConfig: ClawVaultPluginConfig, config: Record<string, unknown>): boolean {
-  if (pluginConfig.allowNativeCategoryOverride === true) return true;
-  return config.allowNativeCategoryOverride === true;
+function isDefaultOverrideEnabled(pluginConfig: ClawVaultPluginConfig, config: Record<string, unknown>): boolean {
+  if (pluginConfig.allowDefaultCategoryOverride === true) return true;
+  return config.allowDefaultCategoryOverride === true;
 }
 
 function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryRegistry {
   const entries = new Map<string, CategoryRegistryEntry>();
   const fileConfig = readCategoryRegistryConfig(vaultPath);
-  const allowNativeOverride = isNativeOverrideEnabled(pluginConfig, fileConfig);
+  const allowDefaultOverride = isDefaultOverrideEnabled(pluginConfig, fileConfig);
 
-  const addNative = (category: string, source: CategoryRegistrySource, mode: CategoryRegistryMode) => {
+  const addDefault = (category: string, source: CategoryRegistrySource, mode: CategoryRegistryMode) => {
     const layer = category === "boot" ? "boot" : mode === "source" ? "source" : "vault";
     const existing = entries.get(category);
     if (existing) {
@@ -224,9 +231,9 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     entries.set(category, {
       category,
       layer,
-      class: "native",
+      class: "default",
       mode,
-      protectedNative: true,
+      protectedDefault: true,
       sources: new Set([source])
     });
   };
@@ -234,10 +241,10 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
   const addCustom = (rawName: string, source: CategoryRegistrySource, mode: CategoryRegistryMode) => {
     const category = normalizeRelPath(rawName).split("/")[0] ?? "";
     if (!isSafeCategoryName(category)) return;
-    if (isNativeCategory(category)) {
-      // Overlay, don't overthrow: ignore custom attempts to redefine native semantics unless explicitly enabled.
-      if (!allowNativeOverride) return;
-      addNative(category, source, isNativeSourceCategory(category) ? "source" : "durable");
+    if (isDefaultCategory(category)) {
+      // Overlay, don't overthrow: ignore custom attempts to redefine default semantics unless explicitly enabled.
+      if (!allowDefaultOverride) return;
+      addDefault(category, source, isDefaultSourceCategory(category) ? "source" : "durable");
       return;
     }
     const existing = entries.get(category);
@@ -250,17 +257,17 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
       layer: mode === "source" ? "source" : "vault",
       class: "custom",
       mode,
-      protectedNative: false,
+      protectedDefault: false,
       sources: new Set([source])
     });
   };
 
-  addNative("boot", "builtin", "durable");
+  addDefault("boot", "builtin", "durable");
   for (const category of DEFAULT_DURABLE_CATEGORIES) {
-    addNative(category, "builtin", "durable");
+    addDefault(category, "builtin", "durable");
   }
   for (const category of DEFAULT_SOURCE_CATEGORIES) {
-    addNative(category, "builtin", "source");
+    addDefault(category, "builtin", "source");
   }
 
   if (Array.isArray((pluginConfig as { memoryOverlayFolders?: unknown }).memoryOverlayFolders)) {
@@ -291,7 +298,17 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     }
   }
 
-  return { entries, allowNativeOverride };
+  return { entries, allowDefaultOverride };
+}
+
+function getRegistrySourceCategories(registry: CategoryRegistry): ReadonlySet<string> {
+  const sourceCategories = new Set<string>();
+  for (const entry of registry.entries.values()) {
+    if (entry.layer === "source") {
+      sourceCategories.add(entry.category);
+    }
+  }
+  return sourceCategories;
 }
 
 function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryInventoryEntry[] {
@@ -371,9 +388,11 @@ export function classifyMemoryTarget(
     };
   }
 
+  const registry = buildCategoryRegistry(vaultPath, pluginConfig);
   const safeRoots = getConfiguredCategoryFolders(vaultPath, pluginConfig);
+  const sourceCategories = getRegistrySourceCategories(registry);
   const readEnabled = safeRoots.has(normalizedCategory);
-  const inferred = inferLayerAndCategory(`${normalizedCategory}/_`);
+  const inferred = inferLayerAndCategory(`${normalizedCategory}/_`, sourceCategories);
   return {
     ok: true,
     input: { category: normalizedCategory },
@@ -403,7 +422,9 @@ export function toSafeMemoryPath(
     throw new Error("Invalid memory path");
   }
 
+  const registry = buildCategoryRegistry(vaultPath, pluginConfig);
   const safeRoots = getConfiguredCategoryFolders(vaultPath, pluginConfig);
+  const sourceCategories = getRegistrySourceCategories(registry);
   const topLevel = mapped.split("/")[0] ?? "";
   const allowByCategory = topLevel.length > 0 && safeRoots.has(topLevel);
   if (mapped !== "MEMORY.md" && !allowByCategory) {
@@ -416,7 +437,7 @@ export function toSafeMemoryPath(
     throw new Error("Path escapes vault root");
   }
 
-  const { layer, category } = inferLayerAndCategory(mapped);
+  const { layer, category } = inferLayerAndCategory(mapped, sourceCategories);
   return {
     absolutePath: absolute,
     metadata: {
@@ -471,12 +492,14 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
     try {
       const vault = new ClawVault(vaultPath);
       await vault.load();
+      const registry = buildCategoryRegistry(vaultPath, this.options.pluginConfig);
+      const sourceCategories = getRegistrySourceCategories(registry);
       const results = await vault.find(normalizedQuery, {
         limit: maxResults,
         minScore,
         temporalBoost: true
       });
-      return sortSearchResults(results.map((result) => mapSearchResult(vaultPath, result)));
+      return sortSearchResults(results.map((result) => mapSearchResult(vaultPath, result, sourceCategories)));
     } catch (error) {
       this.options.logger?.warn(
         `[clawvault] memory_search fallback error: ${error instanceof Error ? error.message : String(error)}`
