@@ -57,3 +57,7 @@ export const PACK_FEATURE_KEYS: Record<ClawVaultAutomationPack, readonly string[
 export function isClawVaultPackName(value: unknown): value is ClawVaultAutomationPack {
   return typeof value === "string" && (CLAWVAULT_PACK_NAMES as readonly string[]).includes(value);
 }
+
+export function isClawVaultPackPreset(value: unknown): value is ClawVaultPackPreset {
+  return typeof value === "string" && value in PACK_PRESET_TOGGLES;
+}

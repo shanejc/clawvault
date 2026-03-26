@@ -2,7 +2,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { OpenClawPluginApi, PluginHookAgentContext } from "./openclaw-types.js";
-import { CLAWVAULT_PACK_NAMES, PACK_FEATURE_KEYS, PACK_PRESET_TOGGLES } from "./packs.js";
+import {
+  CLAWVAULT_PACK_NAMES,
+  PACK_FEATURE_KEYS,
+  PACK_PRESET_TOGGLES,
+  isClawVaultPackPreset
+} from "./packs.js";
 import type { ClawVaultAutomationPack, ClawVaultPackPreset, ClawVaultPackToggleMap } from "./packs.js";
 
 const SESSION_KEY_RE = /^agent:[a-zA-Z0-9_-]+:[a-zA-Z0-9:_-]+$/;
@@ -59,7 +64,7 @@ function isPackFeatureKey(key: keyof ClawVaultPluginConfig): boolean {
 
 function getEffectivePackPreset(pluginConfig: ClawVaultPluginConfig): ClawVaultPackPreset | null {
   const preset = pluginConfig.packPreset ?? pluginConfig.automationPreset;
-  if (!preset) return null;
+  if (!isClawVaultPackPreset(preset)) return null;
   return preset;
 }
 
