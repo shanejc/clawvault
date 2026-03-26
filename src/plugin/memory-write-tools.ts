@@ -61,6 +61,14 @@ type MemoryWriteBootResult = MemoryWriteResultBase & {
   citations: SectionCitation[];
 };
 
+const DEFAULT_BOOT_MEMORY_SECTIONS = [
+  "Identity",
+  "Key Decisions",
+  "Current Focus",
+  "Constraints/Preferences",
+  "Quick Links"
+] as const;
+
 function toBootWriteMode(value: unknown): MemoryWriteBootMode {
   if (value === "replace_section" || value === "upsert_section" || value === "append_under_section") {
     return value;
@@ -327,6 +335,48 @@ function normalizeSectionPayload(content: string): string {
   return content.replace(/^\n+/, "").replace(/\n+$/g, "");
 }
 
+function getSectionBody(markdown: string, section: { startLine: number; endLine: number }): string {
+  const lines = markdown.split(/\r?\n/);
+  return lines.slice(section.startLine, section.endLine).join("\n");
+}
+
+function buildDefaultBootMemoryTemplate(): string {
+  const lines = ["# Boot Memory", ""];
+  for (const section of DEFAULT_BOOT_MEMORY_SECTIONS) {
+    lines.push(`## ${section}`, "");
+  }
+  return `${lines.join("\n").replace(/\n+$/g, "")}\n`;
+}
+
+function appendMissingBootSections(markdown: string): string {
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  const headings = parseSectionRanges(normalized);
+  const existing = new Set(headings.map((section) => section.name.trim().toLowerCase()));
+  const missing = DEFAULT_BOOT_MEMORY_SECTIONS
+    .filter((section) => !existing.has(section.toLowerCase()));
+  if (missing.length === 0) {
+    return normalized;
+  }
+
+  const prefix = normalized.replace(/\n+$/g, "");
+  const lines = [prefix];
+  for (const section of missing) {
+    lines.push("", `## ${section}`, "");
+  }
+  return `${lines.join("\n").replace(/\n+$/g, "")}\n`;
+}
+
+function isMinimallyStructuredBootMemory(markdown: string): boolean {
+  const sections = parseSectionRanges(markdown);
+  const levelTwoCount = sections.filter((section) => section.level === 2).length;
+  if (levelTwoCount === 0) {
+    return true;
+  }
+  const names = new Set(sections.map((section) => section.name.trim().toLowerCase()));
+  const defaultCount = DEFAULT_BOOT_MEMORY_SECTIONS.filter((section) => names.has(section.toLowerCase())).length;
+  return defaultCount < 2;
+}
+
 function ensureMemoryBootTarget(
   vaultPath: string,
   pluginConfig: ClawVaultPluginConfig
@@ -361,11 +411,18 @@ async function writeBootMemorySection(
   const created = !fs.existsSync(resolved.absolutePath);
   if (created) {
     fs.mkdirSync(path.dirname(resolved.absolutePath), { recursive: true });
-    fs.writeFileSync(resolved.absolutePath, "# Boot Memory\n", "utf-8");
+    fs.writeFileSync(resolved.absolutePath, buildDefaultBootMemoryTemplate(), "utf-8");
   }
 
   const payload = normalizeSectionPayload(params.content);
-  const existing = fs.readFileSync(resolved.absolutePath, "utf-8");
+  let existing = fs.readFileSync(resolved.absolutePath, "utf-8");
+  if (isMinimallyStructuredBootMemory(existing)) {
+    const withDefaults = appendMissingBootSections(existing);
+    if (withDefaults !== existing) {
+      fs.writeFileSync(resolved.absolutePath, withDefaults, "utf-8");
+      existing = withDefaults;
+    }
+  }
   const existingSection = findSectionByName(existing, section);
   const vault = new ClawVault(vaultPath);
 
@@ -376,20 +433,34 @@ async function writeBootMemorySection(
     if (params.mode === "append_under_section" && payload.length === 0) {
       throw new Error("append_under_section requires non-empty content");
     }
-    await vault.patch({
-      idOrPath: "MEMORY.md",
-      mode: params.mode === "append_under_section" ? "append" : "content",
-      section,
-      append: params.mode === "append_under_section" ? payload : undefined,
-      content: params.mode === "replace_section" ? payload : undefined
-    });
+    if (params.mode === "replace_section") {
+      const currentBody = normalizeSectionPayload(getSectionBody(existing, existingSection));
+      if (currentBody !== payload) {
+        await vault.patch({
+          idOrPath: "MEMORY.md",
+          mode: "content",
+          section,
+          content: payload
+        });
+      }
+    } else {
+      await vault.patch({
+        idOrPath: "MEMORY.md",
+        mode: "append",
+        section,
+        append: payload
+      });
+    }
   } else if (existingSection) {
-    await vault.patch({
-      idOrPath: "MEMORY.md",
-      mode: "content",
-      section,
-      content: payload
-    });
+    const currentBody = normalizeSectionPayload(getSectionBody(existing, existingSection));
+    if (currentBody !== payload) {
+      await vault.patch({
+        idOrPath: "MEMORY.md",
+        mode: "content",
+        section,
+        content: payload
+      });
+    }
   } else {
     if (payload.length === 0) {
       throw new Error("upsert_section requires non-empty content");
