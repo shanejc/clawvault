@@ -39,6 +39,24 @@ type CategoryInventoryEntry = {
   sources: string[];
 };
 
+type CategoryRegistryClass = "native" | "custom";
+type CategoryRegistryMode = "durable" | "source";
+type CategoryRegistrySource = "builtin" | "plugin" | ".clawvault.json";
+
+type CategoryRegistryEntry = {
+  category: string;
+  layer: MemoryLayer;
+  class: CategoryRegistryClass;
+  mode: CategoryRegistryMode;
+  protectedNative: boolean;
+  sources: Set<string>;
+};
+
+type CategoryRegistry = {
+  entries: Map<string, CategoryRegistryEntry>;
+  allowNativeOverride: boolean;
+};
+
 const MEMORY_LAYER_PRIORITY: Record<MemoryLayer, number> = {
   boot: 0,
   vault: 1,
@@ -166,65 +184,125 @@ function isSafeCategoryName(value: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
 }
 
-function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryInventoryEntry[] {
-  const categorySources = new Map<string, Set<string>>();
-  const addCategory = (rawName: string, source: string) => {
-    const category = normalizeRelPath(rawName).split("/")[0] ?? "";
-    if (!isSafeCategoryName(category)) return;
-    const existing = categorySources.get(category) ?? new Set<string>();
-    existing.add(source);
-    categorySources.set(category, existing);
+function isNativeCategory(category: string): boolean {
+  return category === "boot"
+    || (DEFAULT_DURABLE_CATEGORIES as readonly string[]).includes(category)
+    || (DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category);
+}
+
+function isNativeSourceCategory(category: string): boolean {
+  return (DEFAULT_SOURCE_CATEGORIES as readonly string[]).includes(category);
+}
+
+function readCategoryRegistryConfig(vaultPath: string): Record<string, unknown> {
+  const configPath = path.join(vaultPath, ".clawvault.json");
+  if (!fs.existsSync(configPath)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function isNativeOverrideEnabled(pluginConfig: ClawVaultPluginConfig, config: Record<string, unknown>): boolean {
+  if (pluginConfig.allowNativeCategoryOverride === true) return true;
+  return config.allowNativeCategoryOverride === true;
+}
+
+function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryRegistry {
+  const entries = new Map<string, CategoryRegistryEntry>();
+  const fileConfig = readCategoryRegistryConfig(vaultPath);
+  const allowNativeOverride = isNativeOverrideEnabled(pluginConfig, fileConfig);
+
+  const addNative = (category: string, source: CategoryRegistrySource, mode: CategoryRegistryMode) => {
+    const layer = category === "boot" ? "boot" : mode === "source" ? "source" : "vault";
+    const existing = entries.get(category);
+    if (existing) {
+      existing.sources.add(source);
+      return;
+    }
+    entries.set(category, {
+      category,
+      layer,
+      class: "native",
+      mode,
+      protectedNative: true,
+      sources: new Set([source])
+    });
   };
 
-  categorySources.set("boot", new Set(["builtin"]));
+  const addCustom = (rawName: string, source: CategoryRegistrySource, mode: CategoryRegistryMode) => {
+    const category = normalizeRelPath(rawName).split("/")[0] ?? "";
+    if (!isSafeCategoryName(category)) return;
+    if (isNativeCategory(category)) {
+      // Overlay, don't overthrow: ignore custom attempts to redefine native semantics unless explicitly enabled.
+      if (!allowNativeOverride) return;
+      addNative(category, source, isNativeSourceCategory(category) ? "source" : "durable");
+      return;
+    }
+    const existing = entries.get(category);
+    if (existing) {
+      existing.sources.add(source);
+      return;
+    }
+    entries.set(category, {
+      category,
+      layer: mode === "source" ? "source" : "vault",
+      class: "custom",
+      mode,
+      protectedNative: false,
+      sources: new Set([source])
+    });
+  };
 
+  addNative("boot", "builtin", "durable");
   for (const category of DEFAULT_DURABLE_CATEGORIES) {
-    addCategory(category, "builtin");
+    addNative(category, "builtin", "durable");
   }
   for (const category of DEFAULT_SOURCE_CATEGORIES) {
-    addCategory(category, "builtin");
+    addNative(category, "builtin", "source");
   }
 
   if (Array.isArray((pluginConfig as { memoryOverlayFolders?: unknown }).memoryOverlayFolders)) {
     const configured = (pluginConfig as { memoryOverlayFolders?: unknown[] }).memoryOverlayFolders ?? [];
     for (const value of configured) {
       if (typeof value !== "string") continue;
-      addCategory(value, "plugin");
+      addCustom(value, "plugin", "durable");
     }
   }
 
-  const configPath = path.join(vaultPath, ".clawvault.json");
-  if (fs.existsSync(configPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-      const configuredArrays = [
-        parsed.categories,
-        parsed.overlayCategories,
-        parsed.customCategories,
-        parsed.memoryReadRoots
-      ];
-      for (const candidate of configuredArrays) {
-        if (!Array.isArray(candidate)) continue;
-        for (const item of candidate) {
-          if (typeof item !== "string") continue;
-          addCategory(item, ".clawvault.json");
-        }
-      }
-    } catch {
-      // Ignore invalid JSON and keep default safe categories.
+  const durableCandidates = [
+    fileConfig.categories,
+    fileConfig.overlayCategories,
+    fileConfig.customCategories
+  ];
+  for (const candidate of durableCandidates) {
+    if (!Array.isArray(candidate)) continue;
+    for (const item of candidate) {
+      if (typeof item !== "string") continue;
+      addCustom(item, ".clawvault.json", "durable");
     }
   }
 
-  return [...categorySources.entries()]
-    .map(([category, sources]) => {
-      const layer = category === "boot"
-        ? "boot"
-        : inferLayerAndCategory(`${category}/_`).layer;
+  if (Array.isArray(fileConfig.memoryReadRoots)) {
+    for (const item of fileConfig.memoryReadRoots) {
+      if (typeof item !== "string") continue;
+      addCustom(item, ".clawvault.json", "source");
+    }
+  }
+
+  return { entries, allowNativeOverride };
+}
+
+function collectCategoryInventory(vaultPath: string, pluginConfig: ClawVaultPluginConfig): CategoryInventoryEntry[] {
+  const registry = buildCategoryRegistry(vaultPath, pluginConfig);
+  return [...registry.entries.entries()]
+    .map(([category, entry]) => {
       return {
         category,
-        layer,
-        readEnabled: category === "boot" || sources.size > 0,
-        sources: [...sources].sort()
+        layer: entry.layer,
+        readEnabled: category === "boot" || entry.sources.size > 0,
+        sources: [...entry.sources].sort()
       } satisfies CategoryInventoryEntry;
     })
     .sort((a, b) => a.category.localeCompare(b.category));
