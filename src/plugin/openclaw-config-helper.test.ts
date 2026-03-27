@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FIRST_RUN_OPENCLAW_PRESETS,
   OPENCLAW_PACK_PRESET_CONFIG_PATH,
+  buildOpenClawReadPackPresetArgs,
   buildOpenClawPackPresetArgs,
   getOpenClawPresetInfo,
   isFirstRunOpenClawPreset,
@@ -19,6 +20,14 @@ describe("openclaw pack preset helper", () => {
       "set",
       "plugins.entries.clawvault.config.packPreset",
       mode
+    ]);
+  });
+
+  it("builds config get args for current preset detection", () => {
+    expect(buildOpenClawReadPackPresetArgs()).toEqual([
+      "config",
+      "get",
+      "plugins.entries.clawvault.config.packPreset"
     ]);
   });
 

@@ -40,6 +40,8 @@ export {
   getOpenClawPresetInfo,
   listOpenClawPresetInfo,
   buildOpenClawPackPresetArgs,
+  buildOpenClawReadPackPresetArgs,
+  readOpenClawPackPreset,
   applyOpenClawPackPreset
 } from './plugin/openclaw-config-helper.js';
 export type { FirstRunOpenClawPreset, OpenClawPresetInfo, ApplyOpenClawPresetResult } from './plugin/openclaw-config-helper.js';
@@ -53,6 +55,8 @@ export type {
   MemoryStoreMetadata
 } from './plugin/slot.js';
 export { setupCommand } from './commands/setup.js';
+export { runOpenClawOnboarding } from './commands/openclaw-onboarding.js';
+export type { OpenClawOnboardingOptions, OpenClawOnboardingResult } from './commands/openclaw-onboarding.js';
 export { compatCommand, checkOpenClawCompatibility, compatibilityExitCode } from './commands/compat.js';
 export type { CompatCheck, CompatReport, CompatStatus, CompatCommandOptions } from './commands/compat.js';
 export { graphCommand, graphSummary } from './commands/graph.js';
