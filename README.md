@@ -285,6 +285,34 @@ The hook automatically:
 - Auto-checkpoints before session resets
 - Provides `--profile auto` for context queries
 
+
+### OpenClaw plugin modes (first-run helper)
+
+ClawVault supports three first-run presets for OpenClaw plugin automation behavior:
+
+- `thin` — minimal/manual mode (no autonomous lifecycle hook side effects).
+- `hybrid` — enables session-memory automation hooks (automatic context/recovery lifecycle behavior).
+- `legacy` — enables full legacy-compatible automation packs (session hooks + observation/reflection + communication-policy hooks).
+
+⚠️ **Warning:** `hybrid` and `legacy` introduce autonomous side effects (automatic hook-triggered behavior). If you want fully manual operation, use `thin`.
+
+Set mode with the helper command:
+
+```bash
+clawvault openclaw preset thin
+clawvault openclaw preset hybrid
+clawvault openclaw preset legacy
+```
+
+Equivalent direct OpenClaw config path:
+
+```bash
+openclaw config set plugins.entries.clawvault.config.packPreset thin
+openclaw config set plugins.entries.clawvault.config.packPreset legacy
+```
+
+Switching modes is non-destructive: only `plugins.entries.clawvault.config.packPreset` is updated; existing per-feature flags/`packToggles` are preserved.
+
 ### MEMORY.md vs Vault
 
 If you use both a `MEMORY.md` workspace file and a ClawVault vault, understand their roles:

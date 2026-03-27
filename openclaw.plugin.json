@@ -19,6 +19,46 @@
           "description": "Path to the vault directory for this agent"
         }
       },
+      "packPreset": {
+        "type": "string",
+        "enum": [
+          "thin",
+          "hybrid",
+          "legacy",
+          "automation"
+        ],
+        "description": "Preset pack mode controlling which automation hook bundles are enabled. thin=manual only; hybrid=session-memory automation; legacy/automation=full legacy-compatible automation.",
+        "default": "thin"
+      },
+      "automationPreset": {
+        "type": "string",
+        "enum": [
+          "thin",
+          "hybrid",
+          "legacy",
+          "automation"
+        ],
+        "description": "Deprecated alias for packPreset. packPreset takes precedence when both are set."
+      },
+      "packToggles": {
+        "type": "object",
+        "description": "Optional per-pack overrides. Keys: session-memory, capture-observation, reflection-maintenance, legacy-communication-policy.",
+        "properties": {
+          "session-memory": {
+            "type": "boolean"
+          },
+          "capture-observation": {
+            "type": "boolean"
+          },
+          "reflection-maintenance": {
+            "type": "boolean"
+          },
+          "legacy-communication-policy": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "allowClawvaultExec": {
         "type": "boolean",
         "description": "Security gate for all child_process execution from the plugin. Must be true to run clawvault CLI commands.",
@@ -94,7 +134,13 @@
       },
       "contextProfile": {
         "type": "string",
-        "enum": ["default", "planning", "incident", "handoff", "auto"],
+        "enum": [
+          "default",
+          "planning",
+          "incident",
+          "handoff",
+          "auto"
+        ],
         "description": "Default context profile for session start injection",
         "default": "auto"
       },
@@ -223,6 +269,18 @@
     "weeklyReflection": {
       "label": "Weekly Reflection (Legacy Alias)",
       "description": "Deprecated alias for enableWeeklyReflection."
+    },
+    "packPreset": {
+      "label": "Automation Preset",
+      "description": "thin (manual), hybrid (session-memory automation), or legacy (full legacy-compatible automation)."
+    },
+    "automationPreset": {
+      "label": "Automation Preset (Legacy Alias)",
+      "description": "Deprecated alias for packPreset."
+    },
+    "packToggles": {
+      "label": "Pack Toggles",
+      "description": "Optional per-pack overrides for advanced users."
     }
   }
 }
