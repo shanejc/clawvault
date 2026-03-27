@@ -56,6 +56,31 @@ export function buildOpenClawPackPresetArgs(mode: FirstRunOpenClawPreset): strin
   return ["config", "set", OPENCLAW_PACK_PRESET_CONFIG_PATH, mode];
 }
 
+export function buildOpenClawReadPackPresetArgs(): string[] {
+  return ["config", "get", OPENCLAW_PACK_PRESET_CONFIG_PATH];
+}
+
+export function readOpenClawPackPreset(): FirstRunOpenClawPreset | null {
+  const args = buildOpenClawReadPackPresetArgs();
+  const result = spawnSync("openclaw", args, { encoding: "utf8" });
+
+  if (result.error) {
+    throw new Error(`Failed to run openclaw config get: ${result.error.message}`);
+  }
+
+  if (typeof result.status === "number" && result.status !== 0) {
+    return null;
+  }
+
+  if (result.signal) {
+    throw new Error(`openclaw config get terminated by signal ${result.signal}`);
+  }
+
+  const value = String(result.stdout ?? "").trim();
+  const normalized = value.replace(/^["']|["']$/g, "");
+  return isFirstRunOpenClawPreset(normalized) ? normalized : null;
+}
+
 export function applyOpenClawPackPreset(mode: FirstRunOpenClawPreset): ApplyOpenClawPresetResult {
   if (!isFirstRunOpenClawPreset(mode)) {
     throw new Error(`Unsupported preset: ${String(mode)}. Expected one of: ${FIRST_RUN_OPENCLAW_PRESETS.join(", ")}`);

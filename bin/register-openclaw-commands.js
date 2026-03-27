@@ -18,6 +18,30 @@ export function registerOpenClawCommands(program, { chalk }) {
     .description('OpenClaw integration helpers for ClawVault plugin config');
 
   openclaw
+    .command('onboard [mode]')
+    .description('Interactive-safe onboard helper for OpenClaw plugin mode (thin|hybrid|legacy)')
+    .option('--force', 'Allow changing an existing preset when one is already configured')
+    .option('--dry-run', 'Print the OpenClaw config command without executing it')
+    .action(async (mode, options) => {
+      try {
+        const { runOpenClawOnboard } = await import('../dist/index.js');
+        runOpenClawOnboard({
+          mode,
+          force: options.force === true,
+          dryRun: options.dryRun === true
+        });
+      } catch (err) {
+        const message = err?.message || String(err);
+        if (message.includes('OpenClaw CLI not found')) {
+          console.error(chalk.yellow('Warning: openclaw CLI not found. Install OpenClaw, then re-run onboard.'));
+          process.exit(1);
+        }
+        console.error(chalk.red(`Error: ${message}`));
+        process.exit(1);
+      }
+    });
+
+  openclaw
     .command('preset <mode>')
     .description('Apply first-run ClawVault plugin mode: thin, hybrid, or legacy')
     .option('--dry-run', 'Print the OpenClaw config command without executing it')
