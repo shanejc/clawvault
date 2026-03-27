@@ -553,6 +553,8 @@ We welcome contributions! ClawVault has had **20+ PRs merged** from **6 external
 
 See our [contribution guidelines](https://github.com/Versatly/clawvault/blob/main/CONTRIBUTING.md) for details.
 
+For plugin behavior changes, use the [Plugin Architecture Compliance Checklist](./docs/plugin-architecture-compliance-checklist.md) in review and enforce the hard architecture rule in `src/plugin/ARCHITECTURE.md`.
+
 ---
 
 **$CLAW**: [`5Fjr82MTB8mvxkzi9FYtvrUsPiDGE2M29w3dYcZpump`](https://pump.fun/coin/5Fjr82MTB8mvxkzi9FYtvrUsPiDGE2M29w3dYcZpump)
