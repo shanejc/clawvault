@@ -1,8 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 import clawvaultPlugin from "./openclaw-plugin.js";
+import type { ClawVaultPluginConfig } from "./plugin/config.js";
+
+/*
+Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
+| preset | hooks |
+| --- | --- |
+| thin | (none) |
+| hybrid | before_prompt_build, gateway_start, session_start, session_end, before_reset |
+| legacy | before_prompt_build, message_sending, gateway_start, session_start, session_end, before_reset, before_compaction, agent_end |
+
+Tools are always registered for every preset:
+memory_search, memory_get, memory_categories, memory_classify,
+memory_write_vault, memory_write_boot, memory_capture_source, memory_update, memory_patch
+*/
 
 describe("openclaw plugin registration", () => {
-  it("registers substrate synchronously by default (without automation hooks)", () => {
+  const expectedToolNames = [
+    "memory_search",
+    "memory_get",
+    "memory_categories",
+    "memory_classify",
+    "memory_write_vault",
+    "memory_write_boot",
+    "memory_capture_source",
+    "memory_update",
+    "memory_patch"
+  ];
+
+  function registerWithConfig(pluginConfig: ClawVaultPluginConfig = {}) {
     const hookNames: string[] = [];
     const registerTool = vi.fn();
 
@@ -16,7 +42,8 @@ describe("openclaw plugin registration", () => {
         debug: vi.fn()
       },
       pluginConfig: {
-        vaultPath: "/tmp/does-not-exist"
+        vaultPath: "/tmp/does-not-exist",
+        ...pluginConfig
       },
       registerTool,
       on: vi.fn((hookName: string) => {
@@ -26,28 +53,19 @@ describe("openclaw plugin registration", () => {
 
     const result = clawvaultPlugin.register(api);
 
+    return {
+      result,
+      hookNames,
+      registerTool
+    };
+  }
+
+  it("registers substrate synchronously by default", () => {
+    const { result } = registerWithConfig();
+
     // Critical: OpenClaw discards Promises from register(). Must be sync.
     expect(result).toBeDefined();
     expect(typeof (result as { then?: unknown }).then).not.toBe("function");
-
-    const registeredToolNames = registerTool.mock.calls
-      .map(([, metadata]) => (metadata as { name?: string })?.name)
-      .filter((name): name is string => typeof name === "string");
-    const expectedToolNames = [
-      "memory_search",
-      "memory_get",
-      "memory_categories",
-      "memory_classify",
-      "memory_write_vault",
-      "memory_write_boot",
-      "memory_capture_source",
-      "memory_update",
-      "memory_patch"
-    ];
-
-    expect(registerTool).toHaveBeenCalledTimes(expectedToolNames.length);
-    expect(registeredToolNames).toEqual(expectedToolNames);
-    expect(hookNames).toEqual([]);
 
     const memorySlot = (result as { plugins: { slots: { memory: unknown } } }).plugins.slots.memory as {
       search?: unknown;
@@ -59,99 +77,47 @@ describe("openclaw plugin registration", () => {
     expect(typeof memorySlot.status).toBe("function");
   });
 
-  it("registers automation hooks when automation mode is explicitly enabled", () => {
-    const hookNames: string[] = [];
-    const registerTool = vi.fn();
+  it.each([
+    {
+      preset: "thin",
+      expectedHooks: []
+    },
+    {
+      preset: "hybrid",
+      expectedHooks: ["before_prompt_build", "gateway_start", "session_start", "session_end", "before_reset"]
+    },
+    {
+      preset: "legacy",
+      expectedHooks: [
+        "before_prompt_build",
+        "message_sending",
+        "gateway_start",
+        "session_start",
+        "session_end",
+        "before_reset",
+        "before_compaction",
+        "agent_end"
+      ]
+    }
+  ] as const)("applies exact hook/tool behavior for $preset preset", ({ preset, expectedHooks }) => {
+    const { hookNames, registerTool } = registerWithConfig({ packPreset: preset });
 
-    const api = {
-      id: "clawvault",
-      name: "ClawVault",
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn()
-      },
-      pluginConfig: {
-        vaultPath: "/tmp/does-not-exist",
-        automationMode: true
-      },
-      registerTool,
-      on: vi.fn((hookName: string) => {
-        hookNames.push(hookName);
-      })
-    };
+    const registeredToolNames = registerTool.mock.calls
+      .map(([, metadata]) => (metadata as { name?: string })?.name)
+      .filter((name): name is string => typeof name === "string");
 
-    clawvaultPlugin.register(api);
-
-    expect(hookNames).toContain("before_prompt_build");
-    expect(hookNames).toContain("gateway_start");
-    expect(hookNames).toContain("session_start");
-    expect(hookNames).toContain("session_end");
-    expect(hookNames).toContain("before_reset");
-  });
-
-  it("registers session-memory hooks when a legacy session flag is enabled", () => {
-    const hookNames: string[] = [];
-
-    const api = {
-      id: "clawvault",
-      name: "ClawVault",
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn()
-      },
-      pluginConfig: {
-        vaultPath: "/tmp/does-not-exist",
-        enableSessionContextInjection: true
-      },
-      registerTool: vi.fn(),
-      on: vi.fn((hookName: string) => {
-        hookNames.push(hookName);
-      })
-    };
-
-    clawvaultPlugin.register(api);
-
-    expect(hookNames).toContain("before_prompt_build");
-    expect(hookNames).toContain("gateway_start");
-    expect(hookNames).toContain("session_start");
-    expect(hookNames).toContain("session_end");
-    expect(hookNames).toContain("before_reset");
+    expect(registerTool).toHaveBeenCalledTimes(expectedToolNames.length);
+    expect(registeredToolNames).toEqual(expectedToolNames);
+    expect(hookNames).toEqual(expectedHooks);
   });
 
   it("registers communication-policy hooks when communication pack is enabled", () => {
-    const hookNames: string[] = [];
+    const { hookNames } = registerWithConfig({
+      packToggles: {
+        "legacy-communication-policy": true
+      }
+    });
 
-    const api = {
-      id: "clawvault",
-      name: "ClawVault",
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn()
-      },
-      pluginConfig: {
-        vaultPath: "/tmp/does-not-exist",
-        packToggles: {
-          "legacy-communication-policy": true
-        }
-      },
-      registerTool: vi.fn(),
-      on: vi.fn((hookName: string) => {
-        hookNames.push(hookName);
-      })
-    };
-
-    clawvaultPlugin.register(api);
-
-    expect(hookNames).toContain("before_prompt_build");
-    expect(hookNames).toContain("message_sending");
-    expect(hookNames).not.toContain("before_compaction");
-    expect(hookNames).not.toContain("agent_end");
+    expect(hookNames).toEqual(["before_prompt_build", "message_sending"]);
   });
-
 });
