@@ -290,6 +290,7 @@ The plugin automatically:
 - Provides `--profile auto` for context queries
 
 > **Legacy note:** The older `openclaw hooks install` / `openclaw hooks enable` flow is no longer the recommended path. Use the plugin model above.
+=======
 
 ### OpenClaw plugin modes (first-run helper)
 
@@ -526,10 +527,17 @@ vault/
 - Dependency install fails in restricted/sandboxed environments (Chromium/ONNX binary downloads):
   - run `npm run install:restricted`
   - this skips Puppeteer browser downloads and ONNX runtime binary install hooks so you can still run local build/tests
+<<<<<<< HEAD
 - Plugin not active in OpenClaw:
   - run `openclaw config set plugins.entries.clawvault.package clawvault`
   - run `openclaw config set plugins.slots.memory clawvault`
   - restart the OpenClaw gateway process
+=======
+- Hook/plugin not active in OpenClaw:
+  - run `openclaw hooks install clawvault`
+  - run `openclaw hooks enable clawvault`
+  - verify with `openclaw hooks list --verbose`
+>>>>>>> 29974fc135b31d87345ebb1692bcc97b5ca1fcd8
 - OpenClaw integration drift:
   - run `clawvault compat`
 - Session transcript corruption:
