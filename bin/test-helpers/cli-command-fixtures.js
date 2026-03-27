@@ -10,6 +10,7 @@ import { registerTemplateCommands } from '../register-template-commands.js';
 import { registerVaultOperationsCommands } from '../register-vault-operations-commands.js';
 import { registerConfigCommands } from '../register-config-commands.js';
 import { registerRouteCommands } from '../register-route-commands.js';
+import { registerOpenClawCommands } from '../register-openclaw-commands.js';
 import { registerTaskCommands } from '../register-task-commands.js';
 import { registerKanbanCommands } from '../register-kanban-commands.js';
 import { registerProjectCommands } from '../register-project-commands.js';
@@ -115,6 +116,7 @@ export function registerAllCommandModules(program = new Command()) {
     chalk: chalkStub,
     resolveVaultPath: stubResolveVaultPath
   });
+  registerOpenClawCommands(program, { chalk: chalkStub });
 
   return program;
 }

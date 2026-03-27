@@ -152,14 +152,53 @@ openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
 
 # Explicitly opt into privileged features
 openclaw config set plugins.entries.clawvault.config.allowClawvaultExec true
-openclaw config set plugins.entries.clawvault.config.enableStartupRecovery true
-openclaw config set plugins.entries.clawvault.config.enableSessionContextInjection true
-openclaw config set plugins.entries.clawvault.config.enableAutoCheckpoint true
 
 # Adjust context injection
 openclaw config set plugins.entries.clawvault.config.maxContextResults 6
 openclaw config set plugins.entries.clawvault.config.contextProfile planning
 ```
+
+### First-run mode helper (`thin`, `hybrid`, `legacy`)
+
+ClawVault's OpenClaw integration supports three first-run presets that map to `plugins.entries.clawvault.config.packPreset`:
+
+- `thin` — minimal/manual mode; no autonomous lifecycle hooks are enabled.
+- `hybrid` — enables session-memory automation hooks (automatic startup/session context behavior).
+- `legacy` — enables all legacy-compatible automation packs (session hooks + observation/reflection + communication-policy hooks).
+
+⚠️ **Warning:** `hybrid` and `legacy` can cause autonomous side effects because hooks trigger automatic context/checkpoint/observation behaviors. Use `thin` if you require fully manual/explicit operations.
+
+Use the built-in helper command:
+
+```bash
+clawvault openclaw preset thin
+clawvault openclaw preset hybrid
+clawvault openclaw preset legacy
+```
+
+Equivalent direct OpenClaw config commands:
+
+```bash
+openclaw config set plugins.entries.clawvault.config.packPreset thin
+openclaw config set plugins.entries.clawvault.config.packPreset hybrid
+openclaw config set plugins.entries.clawvault.config.packPreset legacy
+```
+
+Switch back and forth anytime (non-destructive):
+
+```bash
+# Move to safer/manual mode
+clawvault openclaw preset thin
+
+# Later, opt into more automation again
+clawvault openclaw preset legacy
+
+# Or switch with raw OpenClaw config commands
+openclaw config set plugins.entries.clawvault.config.packPreset thin
+openclaw config set plugins.entries.clawvault.config.packPreset legacy
+```
+
+Mode switches only change `packPreset`; they do not erase existing `packToggles` or per-feature booleans.
 
 See [HOOK.md](../hooks/clawvault/HOOK.md) for all configuration options.
 
