@@ -44,6 +44,7 @@ export interface ClawVaultPluginConfig {
   enableMessageSendingFilter?: boolean;
   minQuestionRecallScore?: number;
   memoryOverlayFolders?: string[];
+  memorySourceOverlayFolders?: string[];
   allowDefaultCategoryOverride?: boolean;
 }
 

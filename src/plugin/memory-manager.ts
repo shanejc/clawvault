@@ -278,6 +278,14 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     }
   }
 
+  if (Array.isArray((pluginConfig as { memorySourceOverlayFolders?: unknown }).memorySourceOverlayFolders)) {
+    const configured = (pluginConfig as { memorySourceOverlayFolders?: unknown[] }).memorySourceOverlayFolders ?? [];
+    for (const value of configured) {
+      if (typeof value !== "string") continue;
+      addCustom(value, "plugin", "source");
+    }
+  }
+
   const durableCandidates = [
     fileConfig.categories,
     fileConfig.overlayCategories,
