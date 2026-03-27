@@ -249,6 +249,9 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     }
     const existing = entries.get(category);
     if (existing) {
+      if (existing.mode !== mode) {
+        throw new Error(`Category "${category}" is configured as both durable and source`);
+      }
       existing.sources.add(source);
       return;
     }
@@ -275,6 +278,14 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     for (const value of configured) {
       if (typeof value !== "string") continue;
       addCustom(value, "plugin", "durable");
+    }
+  }
+
+  if (Array.isArray((pluginConfig as { memorySourceOverlayFolders?: unknown }).memorySourceOverlayFolders)) {
+    const configured = (pluginConfig as { memorySourceOverlayFolders?: unknown[] }).memorySourceOverlayFolders ?? [];
+    for (const value of configured) {
+      if (typeof value !== "string") continue;
+      addCustom(value, "plugin", "source");
     }
   }
 

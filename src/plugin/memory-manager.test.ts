@@ -405,6 +405,86 @@ describe("ClawVaultMemoryManager", () => {
     expect(byCategory.get("captures")?.sources).not.toContain("plugin");
   });
 
+  it("registers plugin source overlay categories and infers source layer in classification", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), "{}\n", "utf-8");
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memorySourceOverlayFolders: ["transcripts/raw", "evidence/imports"]
+      },
+      defaultAgentId: "main"
+    })();
+    const classifyTool = createMemoryClassifyToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memorySourceOverlayFolders: ["transcripts/raw"]
+      },
+      defaultAgentId: "main"
+    })();
+
+    const categoryResult = await (categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = categoryResult.categories as Array<{ category: string; layer: string; sources: string[] }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry]));
+
+    expect(byCategory.get("transcripts")?.layer).toBe("source");
+    expect(byCategory.get("transcripts")?.sources).toContain("plugin");
+    expect(byCategory.get("evidence")?.layer).toBe("source");
+
+    const relPathClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      relPath: "transcripts/session-42.md"
+    });
+    expect((relPathClassified.resolved as { layer: string; category: string }).layer).toBe("source");
+    expect((relPathClassified.resolved as { layer: string; category: string }).category).toBe("transcripts");
+
+    const categoryHintClassified = await (classifyTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+      category: "transcripts"
+    });
+    expect((categoryHintClassified.resolved as { layer: string; category: string; readEnabled: boolean }).layer).toBe("source");
+    expect((categoryHintClassified.resolved as { layer: string; category: string; readEnabled: boolean }).readEnabled).toBe(true);
+  });
+
+  it("does not allow plugin source overlays to override default source categories without opt-in", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), JSON.stringify({}, null, 2), "utf-8");
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memorySourceOverlayFolders: ["memory/raw", "sessions/archive"],
+        allowDefaultCategoryOverride: false
+      },
+      defaultAgentId: "main"
+    })();
+
+    const categoryResult = await (categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({});
+    const categories = categoryResult.categories as Array<{ category: string; layer: string; sources: string[] }>;
+    const byCategory = new Map(categories.map((entry) => [entry.category, entry]));
+
+    expect(byCategory.get("memory")?.layer).toBe("source");
+    expect(byCategory.get("memory")?.sources).not.toContain("plugin");
+    expect(byCategory.get("sessions")?.sources).not.toContain("plugin");
+  });
+
+  it("errors when a category is configured as both durable and source", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), "{}\n", "utf-8");
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["transcripts/raw"],
+        memorySourceOverlayFolders: ["transcripts/imports"]
+      },
+      defaultAgentId: "main"
+    })();
+
+    await expect((categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({}))
+      .rejects
+      .toThrow('Category "transcripts" is configured as both durable and source');
+  });
+
   it("allows explicit default category override provenance flag", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
