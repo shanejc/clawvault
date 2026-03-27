@@ -249,6 +249,9 @@ function buildCategoryRegistry(vaultPath: string, pluginConfig: ClawVaultPluginC
     }
     const existing = entries.get(category);
     if (existing) {
+      if (existing.mode !== mode) {
+        throw new Error(`Category "${category}" is configured as both durable and source`);
+      }
       existing.sources.add(source);
       return;
     }

@@ -467,6 +467,24 @@ describe("ClawVaultMemoryManager", () => {
     expect(byCategory.get("sessions")?.sources).not.toContain("plugin");
   });
 
+  it("errors when a category is configured as both durable and source", async () => {
+    const vaultPath = makeTempVaultPath();
+    fs.writeFileSync(path.join(vaultPath, ".clawvault.json"), "{}\n", "utf-8");
+
+    const categoriesTool = createMemoryCategoriesToolFactory({
+      pluginConfig: {
+        vaultPath,
+        memoryOverlayFolders: ["transcripts/raw"],
+        memorySourceOverlayFolders: ["transcripts/imports"]
+      },
+      defaultAgentId: "main"
+    })();
+
+    await expect((categoriesTool.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({}))
+      .rejects
+      .toThrow('Category "transcripts" is configured as both durable and source');
+  });
+
   it("allows explicit default category override provenance flag", async () => {
     const vaultPath = makeTempVaultPath();
     fs.writeFileSync(
