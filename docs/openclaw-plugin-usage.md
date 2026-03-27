@@ -200,6 +200,41 @@ openclaw config set plugins.entries.clawvault.config.packPreset legacy
 
 Mode switches only change `packPreset`; they do not erase existing `packToggles` or per-feature booleans.
 
+For legacy boolean-to-pack mapping details and compatibility guarantees, see [OpenClaw Plugin Packs Migration Guide](./migrations/openclaw-plugin-packs.md).
+
+### Upgrade checklist (existing users)
+
+After upgrading, run this checklist to validate your expected automation behavior:
+
+1. **Confirm effective mode**
+   - Check `plugins.entries.clawvault.config.packPreset`.
+   - If unset, treat behavior as compatibility-driven (legacy booleans and explicit toggles may still activate packs).
+
+2. **Validate thin default expectations**
+   - If you want manual-first behavior, set:
+     ```bash
+     clawvault openclaw preset thin
+     ```
+   - Confirm automated lifecycle/observation behavior is not occurring unless explicitly enabled.
+
+3. **Opt in only to the behavior you want**
+   - Session-memory automation only:
+     ```bash
+     clawvault openclaw preset hybrid
+     ```
+   - Full legacy automation behavior:
+     ```bash
+     clawvault openclaw preset legacy
+     ```
+
+4. **Audit explicit overrides**
+   - Review `packToggles` values (they override preset defaults per pack).
+   - Review legacy feature booleans (`enable*`, aliases like `weeklyReflection`, `autoCheckpoint`, etc.), since explicit booleans can still override feature defaults.
+
+5. **Smoke-test expected hook behavior**
+   - Start a session and verify whether startup recovery/context injection runs as expected.
+   - Trigger workflows that previously depended on observation/reflection or communication-policy behavior and confirm they match your chosen mode (`thin`, `hybrid`, or `legacy`).
+
 See [HOOK.md](../hooks/clawvault/HOOK.md) for all configuration options.
 
 ## Workflow Integration

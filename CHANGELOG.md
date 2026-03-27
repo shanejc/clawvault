@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.5.1] — 2026-03-27
+
+### Changed
+- OpenClaw plugin release notes and docs now explicitly call out the **thin default** behavior (`packPreset=thin`) as the manual-first baseline with no autonomous pack side effects unless users opt in.
+- Added migration guidance for existing plugin users, including a legacy boolean-to-pack mapping reference and pack preset/toggle model documentation.
+
+### Upgrade Notes (OpenClaw plugin)
+- **How to opt into hybrid/legacy:** use `clawvault openclaw preset hybrid` or `clawvault openclaw preset legacy` (or set `plugins.entries.clawvault.config.packPreset` directly).
+- **Backward compatibility guarantees:** existing legacy feature booleans remain supported, map to their owning packs for activation compatibility, and explicit `packToggles` / per-feature booleans continue to override defaults.
+- **Preset switching remains non-destructive:** changing `packPreset` does not erase existing `packToggles` or legacy booleans.
+
+---
+
 ## [3.5.0] — 2026-03-16
 
 ### Changed
