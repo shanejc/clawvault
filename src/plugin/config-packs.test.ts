@@ -49,10 +49,33 @@ describe("pack-aware config behavior", () => {
     expect(isPackEnabled(config, "legacy-communication-policy")).toBe(expected["legacy-communication-policy"]);
   });
 
-  it("maps legacy feature booleans to pack activation", () => {
-    const config: ClawVaultPluginConfig = { enableObserveOnNew: true };
+  it("does not map a single legacy feature boolean to sibling feature activation", () => {
+    const config: ClawVaultPluginConfig = { enableStartupRecovery: true };
 
+    expect(isFeatureEnabled(config, "enableStartupRecovery", false)).toBe(true);
+    expect(isFeatureEnabled(config, "enableSessionContextInjection", false)).toBe(false);
+    expect(isPackEnabled(config, "session-memory")).toBe(false);
+  });
+
+  it("keeps mixed legacy flags isolated across packs", () => {
+    const config: ClawVaultPluginConfig = {
+      enableObserveOnNew: true,
+      enableWeeklyReflection: false
+    };
+
+    expect(isFeatureEnabled(config, "enableObserveOnNew", false)).toBe(true);
+    expect(isFeatureEnabled(config, "enableAutoCheckpoint", false)).toBe(false);
+    expect(isFeatureEnabled(config, "enableWeeklyReflection", true)).toBe(false);
+    expect(isFeatureEnabled(config, "weeklyReflection", false)).toBe(false);
+  });
+
+  it("supports automationMode as a global pack opt-in fallback", () => {
+    const config: ClawVaultPluginConfig = { automationMode: true };
+
+    expect(isPackEnabled(config, "session-memory")).toBe(true);
     expect(isPackEnabled(config, "capture-observation")).toBe(true);
+    expect(isPackEnabled(config, "reflection-maintenance")).toBe(true);
+    expect(isPackEnabled(config, "legacy-communication-policy")).toBe(true);
   });
 
   it("uses pack activation for feature defaults while honoring explicit boolean overrides", () => {
