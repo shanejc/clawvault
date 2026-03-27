@@ -70,10 +70,6 @@ function getEffectivePackPreset(pluginConfig: ClawVaultPluginConfig): ClawVaultP
   return preset;
 }
 
-function hasLegacyPackOptIn(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
-  return PACK_FEATURE_KEYS[pack].some((featureKey) => pluginConfig[featureKey as keyof ClawVaultPluginConfig] === true);
-}
-
 export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
   const explicitToggle = pluginConfig.packToggles?.[pack];
   if (typeof explicitToggle === "boolean") {
@@ -81,10 +77,6 @@ export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVau
   }
 
   if (pluginConfig.automationMode === true) {
-    return true;
-  }
-
-  if (hasLegacyPackOptIn(pluginConfig, pack)) {
     return true;
   }
 
