@@ -280,9 +280,9 @@ openclaw config set plugins.slots.memory clawvault
 # 3. Configure your vault path
 openclaw config set plugins.entries.clawvault.config.vaultPath ~/my-vault
 
-# 4. Choose a plugin mode (first-run onboarding)
-clawvault openclaw onboarding
-clawvault openclaw onboarding thin
+# 4. Choose a plugin mode (first-run onboard)
+clawvault openclaw onboard
+clawvault openclaw onboard thin
 
 # 5. Verify
 clawvault compat
@@ -305,17 +305,17 @@ ClawVault supports three first-run presets for OpenClaw plugin automation behavi
 
 ⚠️ **Warning:** `hybrid` and `legacy` introduce autonomous side effects (automatic hook-triggered behavior). If you want fully manual operation, use `thin`.
 
-Set mode with onboarding (safe, idempotent, and discoverable):
+Set mode with onboard helper (safe, idempotent, and discoverable):
 
 ```bash
 # First run: inspect options
-clawvault openclaw onboarding
+clawvault openclaw onboard
 
 # Apply mode
-clawvault openclaw onboarding thin
+clawvault openclaw onboard thin
 
 # Explicitly change existing mode
-clawvault openclaw onboarding legacy --force
+clawvault openclaw onboard legacy --force
 ```
 
 You can still set mode directly with the helper command:

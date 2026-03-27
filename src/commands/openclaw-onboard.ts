@@ -7,39 +7,39 @@ import {
   type FirstRunOpenClawPreset
 } from '../plugin/openclaw-config-helper.js';
 
-export interface OpenClawOnboardingOptions {
+export interface OpenClawOnboardOptions {
   mode?: string;
   force?: boolean;
   dryRun?: boolean;
 }
 
-export interface OpenClawOnboardingResult {
+export interface OpenClawOnboardResult {
   changed: boolean;
   mode: FirstRunOpenClawPreset | null;
   previousMode: FirstRunOpenClawPreset | null;
   command?: string;
 }
 
-interface OpenClawOnboardingDeps {
+interface OpenClawOnboardDeps {
   readPreset: () => FirstRunOpenClawPreset | null;
   applyPreset: typeof applyOpenClawPackPreset;
   listPresetInfo: typeof listOpenClawPresetInfo;
   getPresetInfo: typeof getOpenClawPresetInfo;
 }
 
-interface OpenClawOnboardingLogger {
+interface OpenClawOnboardLogger {
   info: (message: string) => void;
   warn: (message: string) => void;
 }
 
-const DEFAULT_DEPS: OpenClawOnboardingDeps = {
+const DEFAULT_DEPS: OpenClawOnboardDeps = {
   readPreset: readOpenClawPackPreset,
   applyPreset: applyOpenClawPackPreset,
   listPresetInfo: listOpenClawPresetInfo,
   getPresetInfo: getOpenClawPresetInfo
 };
 
-function printPresetMenu(logger: OpenClawOnboardingLogger, deps: OpenClawOnboardingDeps): void {
+function printPresetMenu(logger: OpenClawOnboardLogger, deps: OpenClawOnboardDeps): void {
   logger.info('Available OpenClaw ClawVault presets:');
   for (const preset of deps.listPresetInfo()) {
     const sideEffectLabel = preset.autonomousSideEffects
@@ -50,14 +50,14 @@ function printPresetMenu(logger: OpenClawOnboardingLogger, deps: OpenClawOnboard
 }
 
 function buildModeCommand(mode: FirstRunOpenClawPreset): string {
-  return `clawvault openclaw onboarding ${mode}`;
+  return `clawvault openclaw onboard ${mode}`;
 }
 
-export function runOpenClawOnboarding(
-  options: OpenClawOnboardingOptions,
-  logger: OpenClawOnboardingLogger = { info: console.log, warn: console.warn },
-  deps: OpenClawOnboardingDeps = DEFAULT_DEPS
-): OpenClawOnboardingResult {
+export function runOpenClawOnboard(
+  options: OpenClawOnboardOptions,
+  logger: OpenClawOnboardLogger = { info: console.log, warn: console.warn },
+  deps: OpenClawOnboardDeps = DEFAULT_DEPS
+): OpenClawOnboardResult {
   const requestedMode = options.mode;
 
   if (requestedMode && !isFirstRunOpenClawPreset(requestedMode)) {
@@ -73,13 +73,13 @@ export function runOpenClawOnboarding(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('spawnSync openclaw ENOENT')) {
-      throw new Error('OpenClaw CLI not found. Install `openclaw` and re-run onboarding.');
+      throw new Error('OpenClaw CLI not found. Install `openclaw` and re-run onboard.');
     }
     throw err;
   }
 
   if (!currentMode && !selectedMode) {
-    logger.info('OpenClaw packPreset is currently unset. Pick a mode to complete onboarding.');
+    logger.info('OpenClaw packPreset is currently unset. Pick a mode to complete setup.');
     printPresetMenu(logger, deps);
     logger.info(`Run one of: ${buildModeCommand('thin')} | ${buildModeCommand('hybrid')} | ${buildModeCommand('legacy')}`);
     return { changed: false, mode: null, previousMode: null };
@@ -91,7 +91,7 @@ export function runOpenClawOnboarding(
 
     if (!selectedMode) {
       printPresetMenu(logger, deps);
-      logger.info('No changes made. To switch modes, run: clawvault openclaw onboarding <mode> --force');
+      logger.info('No changes made. To switch modes, run: clawvault openclaw onboard <mode> --force');
       return { changed: false, mode: currentMode, previousMode: currentMode };
     }
 

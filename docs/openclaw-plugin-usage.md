@@ -179,17 +179,17 @@ ClawVault's OpenClaw integration supports three first-run presets that map to `p
 
 ⚠️ **Warning:** `hybrid` and `legacy` can cause autonomous side effects because hooks trigger automatic context/checkpoint/observation behaviors. Use `thin` if you require fully manual/explicit operations.
 
-Use the onboarding helper (recommended, idempotent):
+Use the onboard helper (recommended, idempotent):
 
 ```bash
 # First run: see all modes + descriptions
-clawvault openclaw onboarding
+clawvault openclaw onboard
 
 # Apply desired mode
-clawvault openclaw onboarding thin
+clawvault openclaw onboard thin
 
 # Change an existing mode explicitly
-clawvault openclaw onboarding legacy --force
+clawvault openclaw onboard legacy --force
 ```
 
 You can also use the direct preset helper command:

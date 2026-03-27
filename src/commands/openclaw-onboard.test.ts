@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runOpenClawOnboarding } from './openclaw-onboarding.js';
+import { runOpenClawOnboard } from './openclaw-onboard.js';
 
 function createLogger() {
   const info: string[] = [];
@@ -14,12 +14,12 @@ function createLogger() {
   };
 }
 
-describe('runOpenClawOnboarding', () => {
+describe('runOpenClawOnboard', () => {
   it('detects first-run when preset is unset and prints preset menu', () => {
     const { logger, info } = createLogger();
     const applyPreset = vi.fn();
 
-    const result = runOpenClawOnboarding(
+    const result = runOpenClawOnboard(
       {},
       logger,
       {
@@ -51,7 +51,7 @@ describe('runOpenClawOnboarding', () => {
       changedOnlyPackPreset: true as const
     }));
 
-    const result = runOpenClawOnboarding(
+    const result = runOpenClawOnboard(
       { mode: 'hybrid' },
       logger,
       {
@@ -76,7 +76,7 @@ describe('runOpenClawOnboarding', () => {
     const { logger, warn } = createLogger();
     const applyPreset = vi.fn();
 
-    const result = runOpenClawOnboarding(
+    const result = runOpenClawOnboard(
       { mode: 'legacy' },
       logger,
       {
@@ -106,7 +106,7 @@ describe('runOpenClawOnboarding', () => {
       changedOnlyPackPreset: true as const
     }));
 
-    const result = runOpenClawOnboarding(
+    const result = runOpenClawOnboard(
       { mode: 'legacy', force: true },
       logger,
       {
@@ -129,7 +129,7 @@ describe('runOpenClawOnboarding', () => {
   it('surfaces openclaw-unavailable failures safely', () => {
     const { logger } = createLogger();
 
-    expect(() => runOpenClawOnboarding(
+    expect(() => runOpenClawOnboard(
       {},
       logger,
       {
@@ -144,6 +144,6 @@ describe('runOpenClawOnboarding', () => {
         ],
         getPresetInfo: (mode) => ({ mode, description: `${mode} desc`, autonomousSideEffects: mode !== 'thin' })
       }
-    )).toThrow('OpenClaw CLI not found. Install `openclaw` and re-run onboarding.');
+    )).toThrow('OpenClaw CLI not found. Install `openclaw` and re-run onboard.');
   });
 });

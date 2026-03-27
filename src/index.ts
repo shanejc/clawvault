@@ -55,8 +55,8 @@ export type {
   MemoryStoreMetadata
 } from './plugin/slot.js';
 export { setupCommand } from './commands/setup.js';
-export { runOpenClawOnboarding } from './commands/openclaw-onboarding.js';
-export type { OpenClawOnboardingOptions, OpenClawOnboardingResult } from './commands/openclaw-onboarding.js';
+export { runOpenClawOnboard } from './commands/openclaw-onboard.js';
+export type { OpenClawOnboardOptions, OpenClawOnboardResult } from './commands/openclaw-onboard.js';
 export { compatCommand, checkOpenClawCompatibility, compatibilityExitCode } from './commands/compat.js';
 export type { CompatCheck, CompatReport, CompatStatus, CompatCommandOptions } from './commands/compat.js';
 export { graphCommand, graphSummary } from './commands/graph.js';
