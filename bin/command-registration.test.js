@@ -11,6 +11,7 @@ import { registerTemplateCommands } from './register-template-commands.js';
 import { registerVaultOperationsCommands } from './register-vault-operations-commands.js';
 import { registerConfigCommands } from './register-config-commands.js';
 import { registerRouteCommands } from './register-route-commands.js';
+import { registerOpenClawCommands } from './register-openclaw-commands.js';
 import {
   chalkStub,
   createGetVaultStub,
@@ -117,6 +118,7 @@ describe('CLI command registration modules', () => {
       chalk: chalkStub,
       resolveVaultPath: stubResolveVaultPath
     });
+    registerOpenClawCommands(program, { chalk: chalkStub });
 
     const names = listCommandNames(program);
     expect(names).toEqual(expect.arrayContaining([
@@ -145,7 +147,8 @@ describe('CLI command registration modules', () => {
       'recap',
       'template',
       'config',
-      'route'
+      'route',
+      'openclaw'
     ]));
 
     const templateCommand = program.commands.find((command) => command.name() === 'template');

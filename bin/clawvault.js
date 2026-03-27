@@ -20,6 +20,7 @@ import { registerConfigCommands } from './register-config-commands.js';
 import { registerRouteCommands } from './register-route-commands.js';
 import { registerKanbanCommands } from './register-kanban-commands.js';
 import { registerProjectCommands } from './register-project-commands.js';
+import { registerOpenClawCommands } from './register-openclaw-commands.js';
 
 import { registerTaskCommands } from './register-task-commands.js';
 
@@ -111,6 +112,7 @@ registerProjectCommands(program, {
 registerTailscaleCommands(program, { chalk });
 registerConfigCommands(program, { chalk, resolveVaultPath });
 registerRouteCommands(program, { chalk, resolveVaultPath });
+registerOpenClawCommands(program, { chalk });
 
 // Parse and run
 program.parse();

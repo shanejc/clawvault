@@ -31,6 +31,18 @@ import { registerCliCommands } from './cli/index.js';
 // Core exports
 export { ClawVault, createVault, findVault } from './lib/vault.js';
 export { default as openclawHookPlugin, createMemorySlotPlugin } from './openclaw-plugin.js';
+export {
+  OPENCLAW_PLUGIN_CONFIG_ROOT,
+  OPENCLAW_PACK_PRESET_CONFIG_KEY,
+  OPENCLAW_PACK_PRESET_CONFIG_PATH,
+  FIRST_RUN_OPENCLAW_PRESETS,
+  isFirstRunOpenClawPreset,
+  getOpenClawPresetInfo,
+  listOpenClawPresetInfo,
+  buildOpenClawPackPresetArgs,
+  applyOpenClawPackPreset
+} from './plugin/openclaw-config-helper.js';
+export type { FirstRunOpenClawPreset, OpenClawPresetInfo, ApplyOpenClawPresetResult } from './plugin/openclaw-config-helper.js';
 export { createMemorySlot, registerMemorySlot } from './plugin/slot.js';
 export type {
   MemorySlot,
