@@ -5,8 +5,15 @@ import { buildCommunicationProtocolAppendix } from "../communication-protocol.js
 import { buildVaultContextInjection, type VaultContextInjectionResult } from "../vault-context-injector.js";
 import type { ClawVaultPluginRuntimeState } from "../runtime-state.js";
 
+const MEMORY_RECALL_ADVISORY = [
+  "ClawVault Memory Recall Guidance:",
+  "- When the prompt depends on prior work, people, decisions, preferences, todos, or historical context, consider calling memory_search first.",
+  "- If memory_search returns useful snippets, ground your answer in those snippets and use memory_get when details are needed.",
+  "- If lookup isn't needed, continue with normal reasoning and answer directly."
+].join("\n");
+
 const MEMORY_RECALL_MANDATE = [
-  "ClawVault Memory Recall Policy:",
+  "ClawVault Memory Recall Policy (Strict):",
   "- Before answering anything about prior work, people, decisions, preferences, todos, or historical context, call memory_search first.",
   "- If memory_search returns relevant snippets, ground your answer in those snippets and use memory_get when details are needed.",
   "- Do not guess from stale context when memory lookup is available."
@@ -43,11 +50,12 @@ export function createBeforePromptBuildHandler(
     const appendSections: string[] = [];
 
     const recallEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableBeforePromptRecall", false);
+    const strictRecallEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableStrictBeforePromptRecall", false);
     const protocolEnabled = isFeatureEnabled(dependencies.pluginConfig, "enforceCommunicationProtocol", false);
     const contextInjectionEnabled = isFeatureEnabled(dependencies.pluginConfig, "enableSessionContextInjection", false);
 
     if (recallEnabled) {
-      prependSections.push(MEMORY_RECALL_MANDATE);
+      prependSections.push(strictRecallEnabled ? MEMORY_RECALL_MANDATE : MEMORY_RECALL_ADVISORY);
     }
 
     const startupNotice = dependencies.runtimeState.consumeStartupRecoveryNotice();

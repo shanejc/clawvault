@@ -89,4 +89,11 @@ describe("pack-aware config behavior", () => {
     expect(isFeatureEnabled(config, "enforceCommunicationProtocol", false)).toBe(true);
     expect(isFeatureEnabled(config, "enableMessageSendingFilter", true)).toBe(false);
   });
+
+  it("keeps strict recall mandate as explicit opt-in even when session-memory pack is enabled", () => {
+    const config: ClawVaultPluginConfig = { packPreset: "hybrid" };
+
+    expect(isFeatureEnabled(config, "enableBeforePromptRecall", false)).toBe(true);
+    expect(isFeatureEnabled(config, "enableStrictBeforePromptRecall", false)).toBe(false);
+  });
 });

@@ -40,6 +40,7 @@ export interface ClawVaultPluginConfig {
   contextProfile?: ClawVaultContextProfile;
   maxContextResults?: number;
   enableBeforePromptRecall?: boolean;
+  enableStrictBeforePromptRecall?: boolean;
   enforceCommunicationProtocol?: boolean;
   enableMessageSendingFilter?: boolean;
   minQuestionRecallScore?: number;

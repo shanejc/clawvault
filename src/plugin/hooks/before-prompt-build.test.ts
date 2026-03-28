@@ -3,7 +3,7 @@ import { createBeforePromptBuildHandler } from "./before-prompt-build.js";
 import { ClawVaultPluginRuntimeState } from "../runtime-state.js";
 
 describe("before_prompt_build hook", () => {
-  it("prepends recall policy, recovery/session context, and vault injection", async () => {
+  it("uses advisory recall guidance for hybrid-style recall, plus recovery/session context and vault injection", async () => {
     const runtimeState = new ClawVaultPluginRuntimeState();
     runtimeState.setStartupRecoveryNotice("Recovered context from last interrupted run.");
     runtimeState.setSessionRecap("agent:main:direct", "Session recap: user asked for deployment notes.");
@@ -28,11 +28,32 @@ describe("before_prompt_build hook", () => {
       { sessionKey: "agent:main:direct", agentId: "main" }
     );
 
-    expect(result?.prependSystemContext).toContain("ClawVault Memory Recall Policy");
+    expect(result?.prependSystemContext).toContain("ClawVault Memory Recall Guidance");
+    expect(result?.prependSystemContext).not.toContain("ClawVault Memory Recall Policy (Strict)");
     expect(result?.prependSystemContext).toContain("Recovered context");
     expect(result?.prependSystemContext).toContain("Session recap");
     expect(result?.prependSystemContext).toContain("Relevant memories");
     expect(result?.appendSystemContext).toContain("ClawVault Communication Protocol");
+  });
+
+  it("prepends strict recall mandate only when explicit strict flag is enabled", async () => {
+    const runtimeState = new ClawVaultPluginRuntimeState();
+    const handler = createBeforePromptBuildHandler({
+      pluginConfig: {
+        enableBeforePromptRecall: true,
+        enableStrictBeforePromptRecall: true,
+        enableSessionContextInjection: false
+      },
+      runtimeState
+    });
+
+    const result = await handler(
+      { prompt: "summarize last sprint decisions", messages: [] },
+      { sessionKey: "agent:main:direct", agentId: "main" }
+    );
+
+    expect(result?.prependSystemContext).toContain("ClawVault Memory Recall Policy (Strict)");
+    expect(result?.prependSystemContext).not.toContain("ClawVault Memory Recall Guidance");
   });
 
   it("returns void when no injection and protocol disabled", async () => {
