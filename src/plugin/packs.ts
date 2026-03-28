@@ -33,6 +33,7 @@ export const PACK_FEATURE_KEYS: Record<ClawVaultAutomationPack, readonly string[
   "session-memory": [
     "enableStartupRecovery",
     "enableSessionContextInjection",
+    // Advisory recall guidance only; strict recall mandate is explicit opt-in via enableStrictBeforePromptRecall.
     "enableBeforePromptRecall"
   ],
   "capture-observation": [
