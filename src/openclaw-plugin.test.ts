@@ -30,6 +30,7 @@ describe("openclaw plugin registration", () => {
 
   function registerWithConfig(pluginConfig: ClawVaultPluginConfig = {}) {
     const hookNames: string[] = [];
+    const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
     const registerTool = vi.fn();
 
     const api = {
@@ -46,8 +47,9 @@ describe("openclaw plugin registration", () => {
         ...pluginConfig
       },
       registerTool,
-      on: vi.fn((hookName: string) => {
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
         hookNames.push(hookName);
+        hookHandlers.set(hookName, handler);
       })
     };
 
@@ -56,6 +58,7 @@ describe("openclaw plugin registration", () => {
     return {
       result,
       hookNames,
+      hookHandlers,
       registerTool
     };
   }
@@ -119,5 +122,39 @@ describe("openclaw plugin registration", () => {
     });
 
     expect(hookNames).toEqual(["before_prompt_build", "message_sending"]);
+  });
+
+  it("dispatches callback handlers for callback mode without running built-in before_prompt_build automation", async () => {
+    const callback = vi.fn(async () => ({ prependSystemContext: "callback-mode-context" }));
+    const { hookHandlers } = registerWithConfig({
+      memoryBehaviorDomains: {
+        "session-memory": "callback"
+      },
+      memoryBehaviorCallbacks: {
+        "session-memory": callback
+      },
+      enableBeforePromptRecall: true
+    });
+
+    const beforePromptBuild = hookHandlers.get("before_prompt_build");
+    expect(beforePromptBuild).toBeTypeOf("function");
+
+    const result = await beforePromptBuild?.({ prompt: "status?", messages: [] }, {});
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ prependSystemContext: "callback-mode-context", appendSystemContext: undefined });
+    expect((result as { prependSystemContext?: string }).prependSystemContext).not.toContain("ClawVault Memory Recall Guidance");
+  });
+
+  it("does not dispatch callbacks when the pack/domain is off", async () => {
+    const callback = vi.fn();
+    const { hookNames } = registerWithConfig({
+      packPreset: "thin",
+      memoryBehaviorCallbacks: {
+        "session-memory": callback
+      }
+    });
+
+    expect(hookNames).toEqual([]);
+    expect(callback).not.toHaveBeenCalled();
   });
 });
