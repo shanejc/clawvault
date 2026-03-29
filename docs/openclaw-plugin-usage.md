@@ -224,6 +224,17 @@ openclaw config set plugins.entries.clawvault.config.packPreset legacy
 
 Mode switches only change `packPreset`; they do not erase existing `packToggles` or per-feature booleans.
 
+You can also set explicit per-domain behavior modes with:
+
+- `plugins.entries.clawvault.config.memoryBehaviorDomains.<pack> = off | auto | callback`
+- Example packs: `session-memory`, `capture-observation`, `reflection-maintenance`, `legacy-communication-policy`.
+
+Domain mode precedence is:
+
+1. `memoryBehaviorDomains.<pack>` (explicit mode)
+2. `packToggles.<pack>` (explicit boolean on/off)
+3. `packPreset` defaults (`thin` defaults to `off`; `hybrid`/`legacy` defaults to `auto` for enabled domains)
+
 For legacy boolean-to-pack mapping details and compatibility guarantees, see [OpenClaw Plugin Packs Migration Guide](./migrations/openclaw-plugin-packs.md).
 
 ### Upgrade checklist (existing users)
