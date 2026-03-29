@@ -7,8 +7,10 @@ export const CLAWVAULT_PACK_NAMES = [
 
 export type ClawVaultAutomationPack = (typeof CLAWVAULT_PACK_NAMES)[number];
 export type ClawVaultPackPreset = "thin" | "hybrid" | "legacy" | "automation";
+export type ClawVaultMemoryBehaviorMode = "off" | "auto" | "callback";
 
 export type ClawVaultPackToggleMap = Partial<Record<ClawVaultAutomationPack, boolean>>;
+export type ClawVaultPackDomainModeMap = Partial<Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorMode>>;
 
 export const PACK_PRESET_TOGGLES: Record<ClawVaultPackPreset, ClawVaultPackToggleMap> = {
   thin: {},
@@ -26,6 +28,33 @@ export const PACK_PRESET_TOGGLES: Record<ClawVaultPackPreset, ClawVaultPackToggl
     "capture-observation": true,
     "reflection-maintenance": true,
     "legacy-communication-policy": true
+  }
+};
+
+export const PACK_PRESET_DOMAIN_MODES: Record<ClawVaultPackPreset, Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorMode>> = {
+  thin: {
+    "session-memory": "off",
+    "capture-observation": "off",
+    "reflection-maintenance": "off",
+    "legacy-communication-policy": "off"
+  },
+  hybrid: {
+    "session-memory": "auto",
+    "capture-observation": "off",
+    "reflection-maintenance": "off",
+    "legacy-communication-policy": "off"
+  },
+  legacy: {
+    "session-memory": "auto",
+    "capture-observation": "auto",
+    "reflection-maintenance": "auto",
+    "legacy-communication-policy": "auto"
+  },
+  automation: {
+    "session-memory": "auto",
+    "capture-observation": "auto",
+    "reflection-maintenance": "auto",
+    "legacy-communication-policy": "auto"
   }
 };
 

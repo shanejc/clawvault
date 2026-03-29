@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFeatureEnabled, isPackEnabled } from "./config.js";
+import { getPackBehaviorMode, isFeatureEnabled, isPackEnabled } from "./config.js";
 import type { ClawVaultPluginConfig } from "./config.js";
 
 /*
@@ -76,6 +76,37 @@ describe("pack-aware config behavior", () => {
     expect(isPackEnabled(config, "capture-observation")).toBe(true);
     expect(isPackEnabled(config, "reflection-maintenance")).toBe(true);
     expect(isPackEnabled(config, "legacy-communication-policy")).toBe(true);
+  });
+
+  it("supports explicit memoryBehaviorDomains mode overrides, including callback", () => {
+    const config: ClawVaultPluginConfig = {
+      packPreset: "thin",
+      memoryBehaviorDomains: {
+        "session-memory": "callback"
+      }
+    };
+
+    expect(getPackBehaviorMode(config, "session-memory")).toBe("callback");
+    expect(isPackEnabled(config, "session-memory")).toBe(true);
+    expect(getPackBehaviorMode(config, "capture-observation")).toBe("off");
+  });
+
+  it("prefers explicit per-domain mode over preset defaults and pack toggles", () => {
+    const config: ClawVaultPluginConfig = {
+      packPreset: "hybrid",
+      packToggles: {
+        "session-memory": true
+      },
+      memoryBehaviorDomains: {
+        "session-memory": "off",
+        "capture-observation": "callback"
+      }
+    };
+
+    expect(getPackBehaviorMode(config, "session-memory")).toBe("off");
+    expect(isPackEnabled(config, "session-memory")).toBe(false);
+    expect(getPackBehaviorMode(config, "capture-observation")).toBe("callback");
+    expect(isPackEnabled(config, "capture-observation")).toBe(true);
   });
 
   it("uses pack activation for feature defaults while honoring explicit boolean overrides", () => {

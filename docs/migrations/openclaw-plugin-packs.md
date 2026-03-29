@@ -8,6 +8,7 @@ The plugin now treats **packs** as the user-facing configuration model:
 
 - `packPreset` chooses a default behavior profile (`thin`, `hybrid`, or `legacy`).
 - `packToggles` allows per-pack opt-in/opt-out overrides.
+- `memoryBehaviorDomains` allows per-domain mode control with enum values: `off`, `auto`, `callback`.
 
 Legacy booleans are still supported for backward compatibility, but they are now a low-level compatibility layer under the pack model.
 
@@ -18,6 +19,14 @@ Legacy booleans are still supported for backward compatibility, but they are now
 | `thin` (default/safest) | none | Manual-first mode. No autonomous lifecycle/observation side effects by default. |
 | `hybrid` | `session-memory` | Enables session memory automation (recovery/context lifecycle behavior), while keeping observation/reflection/policy packs off. |
 | `legacy` | `session-memory`, `capture-observation`, `reflection-maintenance`, `legacy-communication-policy` | Restores legacy-style automation behavior across memory lifecycle + observation/reflection + communication policy hooks. |
+
+### Preset default domain modes
+
+When `memoryBehaviorDomains` is not explicitly set, presets provide defaults:
+
+- `thin` → domain default mode is `off`.
+- `hybrid` → enabled preset domains default to `auto`.
+- `legacy` → enabled preset domains default to `auto`.
 
 ## Legacy boolean → pack mapping
 
@@ -50,10 +59,13 @@ ClawVault preserves compatibility in these ways:
 2. **Explicit `packToggles` take precedence.**  
    If `packToggles.<pack>` is set to `true`/`false`, that explicit value wins.
 
-3. **Feature booleans can still override individual features.**  
+3. **Explicit `memoryBehaviorDomains` takes precedence over preset defaults and `packToggles`.**  
+   If `memoryBehaviorDomains.<pack>` is set to `off` / `auto` / `callback`, that explicit mode is authoritative for that domain.
+
+4. **Feature booleans can still override individual features.**  
    Pack activation supplies default behavior, but explicit per-feature boolean settings continue to override those defaults.
 
-4. **Preset switching is non-destructive.**  
+5. **Preset switching is non-destructive.**  
    Changing `packPreset` does not erase existing `packToggles` or legacy booleans in config.
 
 ## Recommended migration path
@@ -96,3 +108,10 @@ openclaw config set plugins.entries.clawvault.config.packPreset hybrid
 openclaw config set plugins.entries.clawvault.config.packToggles.capture-observation true
 ```
 
+### 5) Fine-grained override with domain modes
+
+```bash
+openclaw config set plugins.entries.clawvault.config.packPreset hybrid
+openclaw config set plugins.entries.clawvault.config.memoryBehaviorDomains.session-memory callback
+openclaw config set plugins.entries.clawvault.config.memoryBehaviorDomains.capture-observation off
+```

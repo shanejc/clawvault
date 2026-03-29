@@ -5,7 +5,7 @@ import type { OpenClawPluginApi, PluginHookAgentContext } from "./openclaw-types
 import {
   CLAWVAULT_PACK_NAMES,
   PACK_FEATURE_KEYS,
-  PACK_PRESET_TOGGLES,
+  PACK_PRESET_DOMAIN_MODES,
   isClawVaultPackPreset
 } from "./packs.js";
 import type { ClawVaultAutomationPack, ClawVaultPackPreset, ClawVaultPackToggleMap } from "./packs.js";
@@ -14,12 +14,15 @@ const SESSION_KEY_RE = /^agent:[a-zA-Z0-9_-]+:[a-zA-Z0-9:_-]+$/;
 const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 
 export type ClawVaultContextProfile = "default" | "planning" | "incident" | "handoff" | "auto";
+export type ClawVaultMemoryBehaviorMode = "off" | "auto" | "callback";
+export type ClawVaultMemoryBehaviorDomainMap = Partial<Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorMode>>;
 
 export interface ClawVaultPluginConfig {
   automationMode?: boolean;
   automationPreset?: "thin" | "hybrid" | "legacy" | "automation";
   packPreset?: ClawVaultPackPreset;
   packToggles?: ClawVaultPackToggleMap;
+  memoryBehaviorDomains?: ClawVaultMemoryBehaviorDomainMap;
   vaultPath?: string;
   agentVaults?: Record<string, string>;
   allowClawvaultExec?: boolean;
@@ -71,20 +74,44 @@ function getEffectivePackPreset(pluginConfig: ClawVaultPluginConfig): ClawVaultP
   return preset;
 }
 
-export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
+function isMemoryBehaviorMode(value: unknown): value is ClawVaultMemoryBehaviorMode {
+  return value === "off" || value === "auto" || value === "callback";
+}
+
+/**
+ * Domain mode precedence:
+ * 1) explicit memoryBehaviorDomains.<pack> mode
+ * 2) explicit packToggles.<pack> boolean
+ * 3) automationMode=true fallback
+ * 4) packPreset/automationPreset default domain mode
+ * 5) off
+ */
+export function getPackBehaviorMode(
+  pluginConfig: ClawVaultPluginConfig,
+  pack: ClawVaultAutomationPack
+): ClawVaultMemoryBehaviorMode {
+  const explicitDomainMode = pluginConfig.memoryBehaviorDomains?.[pack];
+  if (isMemoryBehaviorMode(explicitDomainMode)) {
+    return explicitDomainMode;
+  }
+
   const explicitToggle = pluginConfig.packToggles?.[pack];
   if (typeof explicitToggle === "boolean") {
-    return explicitToggle;
+    return explicitToggle ? "auto" : "off";
   }
 
   if (pluginConfig.automationMode === true) {
-    return true;
+    return "auto";
   }
 
   const preset = getEffectivePackPreset(pluginConfig);
-  if (!preset) return false;
+  if (!preset) return "off";
 
-  return PACK_PRESET_TOGGLES[preset][pack] === true;
+  return PACK_PRESET_DOMAIN_MODES[preset][pack];
+}
+
+export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
+  return getPackBehaviorMode(pluginConfig, pack) !== "off";
 }
 
 export function isOptInEnabled(pluginConfig: ClawVaultPluginConfig, ...keys: Array<keyof ClawVaultPluginConfig>): boolean {
