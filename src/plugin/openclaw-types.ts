@@ -140,6 +140,8 @@ export type ClawVaultMessageSendingCallbackResult = ClawVaultCallbackResultBase 
 };
 
 export type ClawVaultLifecycleCallbackResult = ClawVaultCallbackResultBase & {
+  observe?: boolean;
+  triggerLifecycleAction?: boolean;
   note?: string;
 };
 
@@ -156,6 +158,41 @@ export type ClawVaultCallbackResultMap = {
 
 export type ClawVaultCallbackResult = ClawVaultCallbackResultMap[PluginHookName];
 
+export type ClawVaultBeforePromptBuildSuggestedAction =
+  | "prepend_context"
+  | "append_context"
+  | "prepend_system_context"
+  | "append_system_context"
+  | "rewrite_system_prompt";
+
+export type ClawVaultMessageSendingSuggestedAction = "rewrite_message" | "cancel_message";
+
+export type ClawVaultLifecycleSuggestedAction = "observe_lifecycle" | "trigger_lifecycle_action";
+
+export type ClawVaultSuggestedActionMap = {
+  before_prompt_build: ClawVaultBeforePromptBuildSuggestedAction[];
+  message_sending: ClawVaultMessageSendingSuggestedAction[];
+  session_start: ClawVaultLifecycleSuggestedAction[];
+  session_end: ClawVaultLifecycleSuggestedAction[];
+  gateway_start: ClawVaultLifecycleSuggestedAction[];
+  before_reset: ClawVaultLifecycleSuggestedAction[];
+  before_compaction: ClawVaultLifecycleSuggestedAction[];
+  agent_end: ClawVaultLifecycleSuggestedAction[];
+};
+
+export type ClawVaultCallbackPayloadMap = {
+  [K in PluginHookName]: {
+    domain: string;
+    trigger: K;
+    context: {
+      event: unknown;
+      hookContext: unknown;
+    };
+    suggestedActions: ClawVaultSuggestedActionMap[K];
+    correlationId: string;
+  };
+};
+
 export type ClawVaultCallbackPayload = {
   domain: string;
   trigger: PluginHookName;
@@ -163,9 +200,11 @@ export type ClawVaultCallbackPayload = {
     event: unknown;
     hookContext: unknown;
   };
-  suggestedActions: string[];
+  suggestedActions: ClawVaultSuggestedActionMap[PluginHookName];
   correlationId: string;
 };
+
+export type ClawVaultCallbackPayloadFor<K extends PluginHookName> = ClawVaultCallbackPayloadMap[K];
 
 export type ClawVaultCallbackEventName = "clawvault:callback_invocation";
 

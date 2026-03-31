@@ -150,7 +150,13 @@ describe("openclaw plugin registration", () => {
         event: { prompt: "status?", messages: [] },
         hookContext: {}
       },
-      suggestedActions: ["prepend_system_context", "append_system_context"]
+      suggestedActions: [
+        "prepend_context",
+        "append_context",
+        "prepend_system_context",
+        "append_system_context",
+        "rewrite_system_prompt"
+      ]
     });
     expect((callback.mock.calls[0]?.[0] as { correlationId?: string }).correlationId).toMatch(
       /^clawvault:session-memory:before_prompt_build:\d+$/
@@ -266,6 +272,43 @@ describe("openclaw plugin registration", () => {
     const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
     expect(result).toEqual({ cancel: false });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("invalid callback decision"));
+  });
+
+  it("logs and ignores unsupported callback fields for the active trigger", async () => {
+    const invokeClawVaultCallback = vi.fn(async () => ({
+      decision: "handled",
+      cancel: true,
+      prependSystemContext: "not-allowed-for-message-sending"
+    }));
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        }
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const messageSending = map.get("message_sending");
+    const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
+    expect(result).toEqual({ content: undefined, cancel: true });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("unsupported callback field prependSystemContext"));
   });
 
   it("applies timeout fallback for stalled callback invocations", async () => {

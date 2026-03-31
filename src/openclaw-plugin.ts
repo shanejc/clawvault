@@ -30,6 +30,7 @@ import type {
   ClawVaultCallbackDecision,
   ClawVaultCallbackPayload,
   ClawVaultCallbackResultMap,
+  ClawVaultSuggestedActionMap,
   OpenClawPluginApi,
   PluginHookBeforePromptBuildResult,
   PluginHookName
@@ -152,13 +153,14 @@ async function dispatchPackCallback<K extends PluginHookName>(
   }
 }
 
-function createCallbackPayload(
+function createCallbackPayload<K extends PluginHookName>(
   pack: ClawVaultAutomationPack,
-  hookName: PluginHookName,
+  hookName: K,
   event: unknown,
   ctx: unknown,
   sequence: number
 ): ClawVaultCallbackPayload {
+  const suggestedActions = getSuggestedActions(hookName);
   return {
     domain: pack,
     trigger: hookName,
@@ -166,19 +168,19 @@ function createCallbackPayload(
       event,
       hookContext: ctx
     },
-    suggestedActions: getSuggestedActions(hookName),
+    suggestedActions,
     correlationId: `clawvault:${pack}:${hookName}:${sequence}`
   };
 }
 
-function getSuggestedActions(hookName: PluginHookName): string[] {
+function getSuggestedActions<K extends PluginHookName>(hookName: K): ClawVaultSuggestedActionMap[K] {
   if (hookName === "before_prompt_build") {
-    return ["prepend_system_context", "append_system_context"];
+    return ["prepend_context", "append_context", "prepend_system_context", "append_system_context", "rewrite_system_prompt"] as ClawVaultSuggestedActionMap[K];
   }
   if (hookName === "message_sending") {
-    return ["rewrite_message", "cancel_message"];
+    return ["rewrite_message", "cancel_message"] as ClawVaultSuggestedActionMap[K];
   }
-  return ["observe_only"];
+  return ["observe_lifecycle", "trigger_lifecycle_action"] as ClawVaultSuggestedActionMap[K];
 }
 
 function getCallbackTimeoutMs(pluginConfig: ClawVaultPluginConfig): number {
@@ -274,35 +276,19 @@ function parseCallbackDecision<K extends PluginHookName>(
     );
     return null;
   }
+  logUnsupportedCallbackFields(hookName, value, details);
 
   if (hookName === "before_prompt_build") {
     if (decision !== "handled") {
       return { decision } as ClawVaultCallbackResultMap[K];
     }
 
-    if (value.prependSystemContext !== undefined && typeof value.prependSystemContext !== "string") {
-      details.logger(`[clawvault] invalid callback field prependSystemContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-    if (value.appendSystemContext !== undefined && typeof value.appendSystemContext !== "string") {
-      details.logger(`[clawvault] invalid callback field appendSystemContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-    if (value.prependContext !== undefined && typeof value.prependContext !== "string") {
-      details.logger(`[clawvault] invalid callback field prependContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-    if (value.systemPrompt !== undefined && typeof value.systemPrompt !== "string") {
-      details.logger(`[clawvault] invalid callback field systemPrompt (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-
     return {
       decision,
-      prependSystemContext: value.prependSystemContext,
-      appendSystemContext: value.appendSystemContext,
-      prependContext: value.prependContext,
-      systemPrompt: value.systemPrompt
+      prependSystemContext: getOptionalStringField(value, "prependSystemContext", details, hookName),
+      appendSystemContext: getOptionalStringField(value, "appendSystemContext", details, hookName),
+      prependContext: getOptionalStringField(value, "prependContext", details, hookName),
+      systemPrompt: getOptionalStringField(value, "systemPrompt", details, hookName)
     } as ClawVaultCallbackResultMap[K];
   }
 
@@ -311,23 +297,80 @@ function parseCallbackDecision<K extends PluginHookName>(
       return { decision } as ClawVaultCallbackResultMap[K];
     }
 
-    if (value.content !== undefined && typeof value.content !== "string") {
-      details.logger(`[clawvault] invalid callback field content (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-    if (value.cancel !== undefined && typeof value.cancel !== "boolean") {
-      details.logger(`[clawvault] invalid callback field cancel (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
-      return null;
-    }
-
     return {
       decision,
-      content: value.content,
-      cancel: value.cancel
+      content: getOptionalStringField(value, "content", details, hookName),
+      cancel: getOptionalBooleanField(value, "cancel", details, hookName)
     } as ClawVaultCallbackResultMap[K];
   }
 
-  return { decision } as ClawVaultCallbackResultMap[K];
+  if (decision !== "handled") {
+    return { decision } as ClawVaultCallbackResultMap[K];
+  }
+
+  return {
+    decision,
+    observe: getOptionalBooleanField(value, "observe", details, hookName),
+    triggerLifecycleAction: getOptionalBooleanField(value, "triggerLifecycleAction", details, hookName),
+    note: getOptionalStringField(value, "note", details, hookName)
+  } as ClawVaultCallbackResultMap[K];
+}
+
+function getOptionalStringField<K extends PluginHookName>(
+  source: Record<string, unknown>,
+  fieldName: string,
+  details: { logger: (message: string) => void; pack: ClawVaultAutomationPack; correlationId: string },
+  hookName: K
+): string | undefined {
+  const value = source[fieldName];
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value;
+  details.logger(
+    `[clawvault] unsupported callback field value ${fieldName} (${details.pack}:${hookName}, correlationId=${details.correlationId}); ignoring`
+  );
+  return undefined;
+}
+
+function getOptionalBooleanField<K extends PluginHookName>(
+  source: Record<string, unknown>,
+  fieldName: string,
+  details: { logger: (message: string) => void; pack: ClawVaultAutomationPack; correlationId: string },
+  hookName: K
+): boolean | undefined {
+  const value = source[fieldName];
+  if (value === undefined) return undefined;
+  if (typeof value === "boolean") return value;
+  details.logger(
+    `[clawvault] unsupported callback field value ${fieldName} (${details.pack}:${hookName}, correlationId=${details.correlationId}); ignoring`
+  );
+  return undefined;
+}
+
+const ALLOWED_CALLBACK_RESULT_FIELDS: { [K in PluginHookName]: readonly string[] } = {
+  before_prompt_build: ["decision", "reason", "prependSystemContext", "appendSystemContext", "prependContext", "systemPrompt"],
+  message_sending: ["decision", "reason", "content", "cancel"],
+  session_start: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
+  session_end: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
+  gateway_start: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
+  before_reset: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
+  before_compaction: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
+  agent_end: ["decision", "reason", "observe", "triggerLifecycleAction", "note"]
+};
+
+function logUnsupportedCallbackFields<K extends PluginHookName>(
+  hookName: K,
+  result: Record<string, unknown>,
+  details: { logger: (message: string) => void; pack: ClawVaultAutomationPack; correlationId: string }
+): void {
+  const allowedFields = new Set(ALLOWED_CALLBACK_RESULT_FIELDS[hookName]);
+  for (const field of Object.keys(result)) {
+    if (allowedFields.has(field)) {
+      continue;
+    }
+    details.logger(
+      `[clawvault] unsupported callback field ${field} (${details.pack}:${hookName}, correlationId=${details.correlationId}); ignoring`
+    );
+  }
 }
 
 function applyNonHandledDecisionPolicy(
