@@ -27,9 +27,11 @@ import {
   handleBeforeCompactionObservation
 } from "./plugin/hooks/observation.js";
 import type {
+  ClawVaultCallbackDecision,
   ClawVaultCallbackPayload,
+  ClawVaultCallbackResultMap,
   OpenClawPluginApi,
-  PluginHookMessageSendingResult,
+  PluginHookBeforePromptBuildResult,
   PluginHookName
 } from "./plugin/openclaw-types.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
@@ -71,15 +73,19 @@ function getEffectiveHookConfig(
   };
 }
 
-async function dispatchPackCallback(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function dispatchPackCallback<K extends PluginHookName>(
   api: OpenClawPluginApi,
   pluginConfig: ClawVaultPluginConfig,
   pack: ClawVaultAutomationPack,
-  hookName: PluginHookName,
+  hookName: K,
   event: unknown,
   ctx: unknown,
   sequence: number
-): Promise<unknown> {
+): Promise<ClawVaultCallbackResultMap[K]> {
   const payload = createCallbackPayload(pack, hookName, event, ctx, sequence);
   await api.emitRuntimeEvent?.("clawvault:callback_invocation", payload);
 
@@ -92,22 +98,32 @@ async function dispatchPackCallback(
 
   if (typeof api.invokeClawVaultCallback === "function") {
     try {
-      return await invokeWithTimeout(api.invokeClawVaultCallback);
+      const result = await invokeWithTimeout(api.invokeClawVaultCallback);
+      return parseCallbackDecision(hookName, result, {
+        logger: api.logger.warn,
+        pack,
+        correlationId: payload.correlationId
+      });
     } catch (error) {
       api.logger.warn(formatCallbackFailure(pack, hookName, payload.correlationId, error));
-      return getCallbackFallback(hookName);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
     }
   }
 
   const callback = pluginConfig.memoryBehaviorCallbacks?.[pack];
   if (typeof callback !== "function") {
-    return;
+    return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
   }
   try {
-    return await invokeWithTimeout(callback);
+    const result = await invokeWithTimeout(callback);
+    return parseCallbackDecision(hookName, result, {
+      logger: api.logger.warn,
+      pack,
+      correlationId: payload.correlationId
+    });
   } catch (error) {
     api.logger.warn(formatCallbackFailure(pack, hookName, payload.correlationId, error));
-    return getCallbackFallback(hookName);
+    return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
   }
 }
 
@@ -175,14 +191,96 @@ function formatCallbackFailure(
   return `[clawvault] callback invocation failed (${pack}:${hookName}, correlationId=${correlationId}): ${detail}`;
 }
 
-function getCallbackFallback(hookName: PluginHookName): unknown {
+function getCallbackFallback(hookName: PluginHookName): ClawVaultCallbackResultMap[PluginHookName] {
   if (hookName === "message_sending") {
-    return { cancel: false } satisfies PluginHookMessageSendingResult;
+    return { decision: "handled", cancel: false };
   }
-  return;
+  return { decision: "skip" };
 }
 
-function mergeBeforePromptBuildResults(results: unknown[]): { prependSystemContext?: string; appendSystemContext?: string } | void {
+function parseDecision(value: unknown): ClawVaultCallbackDecision | null {
+  if (value === "handled" || value === "skip" || value === "fallback_auto" || value === "error") {
+    return value;
+  }
+  return null;
+}
+
+function parseCallbackDecision<K extends PluginHookName>(
+  hookName: K,
+  value: unknown,
+  details: { logger: (message: string) => void; pack: ClawVaultAutomationPack; correlationId: string }
+): ClawVaultCallbackResultMap[K] {
+  if (!isRecord(value)) {
+    details.logger(
+      `[clawvault] invalid callback result shape (${details.pack}:${hookName}, correlationId=${details.correlationId}): expected object`
+    );
+    return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+  }
+
+  const decision = parseDecision(value.decision);
+  if (!decision) {
+    details.logger(
+      `[clawvault] invalid callback decision (${details.pack}:${hookName}, correlationId=${details.correlationId}): ${String(value.decision)}`
+    );
+    return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+  }
+
+  if (hookName === "before_prompt_build") {
+    if (decision !== "handled") {
+      return { decision } as ClawVaultCallbackResultMap[K];
+    }
+
+    if (value.prependSystemContext !== undefined && typeof value.prependSystemContext !== "string") {
+      details.logger(`[clawvault] invalid callback field prependSystemContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+    if (value.appendSystemContext !== undefined && typeof value.appendSystemContext !== "string") {
+      details.logger(`[clawvault] invalid callback field appendSystemContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+    if (value.prependContext !== undefined && typeof value.prependContext !== "string") {
+      details.logger(`[clawvault] invalid callback field prependContext (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+    if (value.systemPrompt !== undefined && typeof value.systemPrompt !== "string") {
+      details.logger(`[clawvault] invalid callback field systemPrompt (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+
+    return {
+      decision,
+      prependSystemContext: value.prependSystemContext,
+      appendSystemContext: value.appendSystemContext,
+      prependContext: value.prependContext,
+      systemPrompt: value.systemPrompt
+    } as ClawVaultCallbackResultMap[K];
+  }
+
+  if (hookName === "message_sending") {
+    if (decision !== "handled") {
+      return { decision } as ClawVaultCallbackResultMap[K];
+    }
+
+    if (value.content !== undefined && typeof value.content !== "string") {
+      details.logger(`[clawvault] invalid callback field content (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+    if (value.cancel !== undefined && typeof value.cancel !== "boolean") {
+      details.logger(`[clawvault] invalid callback field cancel (${details.pack}:${hookName}, correlationId=${details.correlationId})`);
+      return getCallbackFallback(hookName) as ClawVaultCallbackResultMap[K];
+    }
+
+    return {
+      decision,
+      content: value.content,
+      cancel: value.cancel
+    } as ClawVaultCallbackResultMap[K];
+  }
+
+  return { decision } as ClawVaultCallbackResultMap[K];
+}
+
+function mergeBeforePromptBuildResults(results: Array<PluginHookBeforePromptBuildResult | void>): PluginHookBeforePromptBuildResult | void {
   const prependSections: string[] = [];
   const appendSections: string[] = [];
 
@@ -250,15 +348,37 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
       runtimeState
     });
     api.on("before_prompt_build", async (event, ctx) => {
-      const results: unknown[] = [];
+      const results: Array<PluginHookBeforePromptBuildResult | void> = [];
       if (beforePromptAutoPacks.length > 0) {
         results.push(await builtInBeforePromptBuildHandler(event, ctx));
       }
       if (sessionMemoryMode === "callback") {
-        results.push(await dispatchPackCallback(api, pluginConfig, "session-memory", "before_prompt_build", event, ctx, nextSequence()));
+        const callback = await dispatchPackCallback(api, pluginConfig, "session-memory", "before_prompt_build", event, ctx, nextSequence());
+        if (callback.decision === "handled") {
+          results.push(callback);
+        } else if (callback.decision === "fallback_auto") {
+          results.push(await builtInBeforePromptBuildHandler(event, ctx));
+        } else if (callback.decision === "error") {
+          api.logger.warn("[clawvault] before_prompt_build callback returned error decision; skipping callback output");
+        }
       }
       if (communicationPolicyMode === "callback") {
-        results.push(await dispatchPackCallback(api, pluginConfig, "legacy-communication-policy", "before_prompt_build", event, ctx, nextSequence()));
+        const callback = await dispatchPackCallback(
+          api,
+          pluginConfig,
+          "legacy-communication-policy",
+          "before_prompt_build",
+          event,
+          ctx,
+          nextSequence()
+        );
+        if (callback.decision === "handled") {
+          results.push(callback);
+        } else if (callback.decision === "fallback_auto") {
+          results.push(await builtInBeforePromptBuildHandler(event, ctx));
+        } else if (callback.decision === "error") {
+          api.logger.warn("[clawvault] before_prompt_build callback returned error decision; skipping callback output");
+        }
       }
       return mergeBeforePromptBuildResults(results);
     }, { priority: 30 });
@@ -277,7 +397,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
       if (communicationPolicyMode === "auto") {
         return builtInMessageHandler(event, ctx);
       }
-      const callbackResult = await dispatchPackCallback(
+      const callback = await dispatchPackCallback(
         api,
         pluginConfig,
         "legacy-communication-policy",
@@ -286,15 +406,67 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         ctx,
         nextSequence()
       );
-      if (!callbackResult || typeof callbackResult !== "object") {
-        return;
+      if (callback.decision === "handled") {
+        return {
+          content: callback.content,
+          cancel: callback.cancel
+        };
       }
-      return callbackResult as PluginHookMessageSendingResult;
+      if (callback.decision === "fallback_auto") {
+        return builtInMessageHandler(event, ctx);
+      }
+      if (callback.decision === "error") {
+        api.logger.warn("[clawvault] message_sending callback returned error decision; using safe fallback");
+        return { cancel: false };
+      }
+      return;
     }, { priority: 20 });
   }
 
   if (sessionMemoryEnabled || captureObservationEnabled || reflectionMaintenanceEnabled) {
     const lifecycleConfig = getEffectiveHookConfig(pluginConfig, lifecycleAutoPacks);
+
+    const runLifecycleAutoFallback = async (hookName: "gateway_start" | "session_start" | "session_end" | "before_reset", event: unknown, ctx: unknown) => {
+      if (hookName === "gateway_start") {
+        await handleGatewayStart(event as never, ctx as never, {
+          pluginConfig: lifecycleConfig,
+          runtimeState,
+          logger: api.logger
+        });
+      } else if (hookName === "session_start") {
+        await handleSessionStart(event as never, ctx as never, {
+          pluginConfig: lifecycleConfig,
+          runtimeState,
+          logger: api.logger
+        });
+      } else if (hookName === "session_end") {
+        await handleSessionEnd(event as never, ctx as never, {
+          pluginConfig: lifecycleConfig,
+          runtimeState,
+          logger: api.logger
+        });
+      } else {
+        await handleBeforeReset(event as never, ctx as never, {
+          pluginConfig: lifecycleConfig,
+          runtimeState,
+          logger: api.logger
+        });
+      }
+    };
+
+    const applyLifecycleCallbackDecision = async (
+      decision: ClawVaultCallbackDecision,
+      hookName: "gateway_start" | "session_start" | "session_end" | "before_reset",
+      event: unknown,
+      ctx: unknown
+    ) => {
+      if (decision === "fallback_auto") {
+        await runLifecycleAutoFallback(hookName, event, ctx);
+      } else if (decision === "error") {
+        api.logger.warn(`[clawvault] ${hookName} callback returned error decision; continuing safely`);
+      }
+    };
+
     api.on("gateway_start", async (event, ctx) => {
       if (lifecycleAutoPacks.length > 0) {
         await handleGatewayStart(event, ctx, {
@@ -304,13 +476,16 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "session-memory", "gateway_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "session-memory", "gateway_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "gateway_start", event, ctx);
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "gateway_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "gateway_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "gateway_start", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "gateway_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "gateway_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "gateway_start", event, ctx);
       }
     });
 
@@ -323,13 +498,16 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "session-memory", "session_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "session-memory", "session_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_start", event, ctx);
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_start", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_start", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_start", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_start", event, ctx);
       }
     });
 
@@ -342,13 +520,16 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "session-memory", "session_end", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "session-memory", "session_end", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_end", event, ctx);
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_end", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_end", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_end", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_end", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_end", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "session_end", event, ctx);
       }
     });
 
@@ -361,13 +542,16 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "session-memory", "before_reset", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "session-memory", "before_reset", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "before_reset", event, ctx);
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_reset", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_reset", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "before_reset", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "before_reset", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "before_reset", event, ctx, nextSequence());
+        await applyLifecycleCallbackDecision(callback.decision, "before_reset", event, ctx);
       }
     });
   }
@@ -382,7 +566,15 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_compaction", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_compaction", event, ctx, nextSequence());
+        if (callback.decision === "fallback_auto") {
+          await handleBeforeCompactionObservation(event, ctx, {
+            pluginConfig: observationConfig,
+            logger: api.logger
+          });
+        } else if (callback.decision === "error") {
+          api.logger.warn("[clawvault] before_compaction callback returned error decision; continuing safely");
+        }
       }
     });
 
@@ -394,7 +586,15 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(api, pluginConfig, "capture-observation", "agent_end", event, ctx, nextSequence());
+        const callback = await dispatchPackCallback(api, pluginConfig, "capture-observation", "agent_end", event, ctx, nextSequence());
+        if (callback.decision === "fallback_auto") {
+          await handleAgentEndHeartbeat(event, ctx, {
+            pluginConfig: observationConfig,
+            logger: api.logger
+          });
+        } else if (callback.decision === "error") {
+          api.logger.warn("[clawvault] agent_end callback returned error decision; continuing safely");
+        }
       }
     });
   }

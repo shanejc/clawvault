@@ -127,7 +127,7 @@ describe("openclaw plugin registration", () => {
   });
 
   it("dispatches callback handlers for callback mode without running built-in before_prompt_build automation", async () => {
-    const callback = vi.fn(async () => ({ prependSystemContext: "callback-mode-context" }));
+    const callback = vi.fn(async () => ({ decision: "handled", prependSystemContext: "callback-mode-context" }));
     const { hookHandlers } = registerWithConfig({
       memoryBehaviorDomains: {
         "session-memory": "callback"
@@ -160,7 +160,7 @@ describe("openclaw plugin registration", () => {
   });
 
   it("prefers API callback invoker when provided and emits runtime callback events", async () => {
-    const invokeClawVaultCallback = vi.fn(async () => ({ prependSystemContext: "from-api" }));
+    const invokeClawVaultCallback = vi.fn(async () => ({ decision: "handled", prependSystemContext: "from-api" }));
     const emitRuntimeEvent = vi.fn();
     const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -179,7 +179,7 @@ describe("openclaw plugin registration", () => {
           "session-memory": "callback"
         },
         memoryBehaviorCallbacks: {
-          "session-memory": vi.fn(async () => ({ prependSystemContext: "from-config-callback" }))
+          "session-memory": vi.fn(async () => ({ decision: "handled", prependSystemContext: "from-config-callback" }))
         }
       },
       registerTool: vi.fn(),
@@ -233,6 +233,39 @@ describe("openclaw plugin registration", () => {
     const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
     expect(result).toEqual({ cancel: false });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("callback invocation failed"));
+  });
+
+  it("rejects invalid callback shapes and uses safe fallback", async () => {
+    const invokeClawVaultCallback = vi.fn(async () => ({ prependSystemContext: "missing-decision" }));
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        }
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const messageSending = map.get("message_sending");
+    const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
+    expect(result).toEqual({ cancel: false });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("invalid callback decision"));
   });
 
   it("applies timeout fallback for stalled callback invocations", async () => {
