@@ -237,6 +237,32 @@ Domain mode precedence is:
 
 For legacy boolean-to-pack mapping details and compatibility guarantees, see [OpenClaw Plugin Packs Migration Guide](./migrations/openclaw-plugin-packs.md).
 
+### `reflection-maintenance` semantics (`off` vs `auto` vs `callback`)
+
+For the `reflection-maintenance` domain, the lifecycle hook entry points are:
+
+- `gateway_start`
+- `session_start`
+- `session_end`
+- `before_reset`
+
+In `auto`, these hooks run built-in lifecycle handlers, and reflection-specific automation currently happens through `session_start` (`handleSessionStart`), which runs weekly reflection checks when enabled.
+
+In `callback`, ClawVault invokes your callback and expects an explicit lifecycle decision plus optional distillation orchestration metadata:
+
+- `decision: "handled" | "fallback_auto" | "skip" | "error"`
+- `distillationOutcome?: "local_run_approved" | "delegated_event" | "queued_for_approval" | "skipped"`
+- `note?: string`
+
+When `decision: "handled"` for `reflection-maintenance`, `distillationOutcome` controls orchestration behavior:
+
+- `local_run_approved` — execute local built-in lifecycle handling for that hook and emit a `clawvault:distillation_orchestration` runtime event.
+- `delegated_event` — do not run local orchestration; emit `clawvault:distillation_orchestration` so an external orchestrator can handle it.
+- `queued_for_approval` — do not run local orchestration; emit `clawvault:distillation_orchestration` indicating queued state.
+- `skipped` (or omitted) — no local orchestration; emit `clawvault:distillation_orchestration` as a no-op/skip outcome.
+
+No AGENTS-specific natural-language parsing is used for this path; orchestration is driven by explicit structured callback fields.
+
 ### Upgrade checklist (existing users)
 
 After upgrading, run this checklist to validate your expected automation behavior:

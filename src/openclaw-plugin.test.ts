@@ -705,4 +705,67 @@ describe("openclaw plugin registration", () => {
     await gatewayStart?.({ port: 3377 }, { port: 3377 });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("No vault found, skipping startup recovery"));
   });
+
+  it.each([
+    { distillationOutcome: "local_run_approved", expectedInfoLog: undefined },
+    {
+      distillationOutcome: "delegated_event",
+      expectedInfoLog: "[clawvault] reflection-maintenance delegated distillation (session_start, correlationId=clawvault:reflection-maintenance:session_start:1)"
+    },
+    {
+      distillationOutcome: "queued_for_approval",
+      expectedInfoLog: "[clawvault] reflection-maintenance queued distillation for approval (session_start, correlationId=clawvault:reflection-maintenance:session_start:1)"
+    },
+    {
+      distillationOutcome: "skipped",
+      expectedInfoLog: "[clawvault] reflection-maintenance distillation skipped (session_start, correlationId=clawvault:reflection-maintenance:session_start:1)"
+    }
+  ] as const)("orchestrates reflection-maintenance callback outcomes: $distillationOutcome", async ({ distillationOutcome, expectedInfoLog }) => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const emitRuntimeEvent = vi.fn();
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "reflection-maintenance": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "legacy"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      emitRuntimeEvent,
+      invokeClawVaultCallback: vi.fn(async () => ({
+        decision: "handled",
+        distillationOutcome,
+        note: "orchestration-note"
+      }))
+    });
+
+    const sessionStart = map.get("session_start");
+    await sessionStart?.({ sessionId: "s_1", sessionKey: "agent/main" }, { sessionId: "s_1", sessionKey: "agent/main", agentId: "main" });
+
+    expect(emitRuntimeEvent).toHaveBeenCalledWith(
+      "clawvault:distillation_orchestration",
+      expect.objectContaining({
+        domain: "reflection-maintenance",
+        trigger: "session_start",
+        outcome: distillationOutcome
+      })
+    );
+    if (expectedInfoLog) {
+      expect(logger.info).toHaveBeenCalledWith(expectedInfoLog);
+    }
+  });
 });

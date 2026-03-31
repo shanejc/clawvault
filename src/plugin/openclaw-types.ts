@@ -142,6 +142,7 @@ export type ClawVaultMessageSendingCallbackResult = ClawVaultCallbackResultBase 
 export type ClawVaultLifecycleCallbackResult = ClawVaultCallbackResultBase & {
   observe?: boolean;
   triggerLifecycleAction?: boolean;
+  distillationOutcome?: "local_run_approved" | "delegated_event" | "queued_for_approval" | "skipped";
   note?: string;
 };
 
@@ -206,11 +207,21 @@ export type ClawVaultCallbackPayload = {
 
 export type ClawVaultCallbackPayloadFor<K extends PluginHookName> = ClawVaultCallbackPayloadMap[K];
 
-export type ClawVaultCallbackEventName = "clawvault:callback_invocation";
+export type ClawVaultCallbackEventName =
+  | "clawvault:callback_invocation"
+  | "clawvault:distillation_orchestration";
+
+export type ClawVaultDistillationOrchestrationPayload = {
+  domain: "reflection-maintenance";
+  trigger: PluginHookName;
+  correlationId: string;
+  outcome: "local_run_approved" | "delegated_event" | "queued_for_approval" | "skipped";
+  note?: string;
+};
 
 export type ClawVaultCallbackEventEmitter = (
   eventName: ClawVaultCallbackEventName,
-  payload: ClawVaultCallbackPayload
+  payload: ClawVaultCallbackPayload | ClawVaultDistillationOrchestrationPayload
 ) => void | Promise<void>;
 
 export type ClawVaultCallbackInvoker = (payload: ClawVaultCallbackPayload) => unknown | Promise<unknown>;
