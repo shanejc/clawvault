@@ -423,4 +423,286 @@ describe("openclaw plugin registration", () => {
     expect(hookNames).toEqual([]);
     expect(callback).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      hookName: "before_prompt_build",
+      event: { prompt: "hello", messages: [] },
+      ctx: {},
+      behaviorConfig: {
+        memoryBehaviorDomains: {
+          "session-memory": "callback"
+        },
+        enableBeforePromptRecall: true
+      },
+      handledResult: { decision: "handled", prependSystemContext: "handled-context" },
+      expectedHandled: { prependSystemContext: "handled-context", appendSystemContext: undefined },
+      expectedErrorResult: undefined,
+      autoCheck: (result: unknown) => {
+        expect((result as { prependSystemContext?: string } | undefined)?.prependSystemContext).toContain(
+          "ClawVault Memory Recall Guidance"
+        );
+      },
+      errorLog: "[clawvault] before_prompt_build callback returned error decision; skipping callback output"
+    },
+    {
+      hookName: "message_sending",
+      event: { to: "ops", content: "good catch, thanks." },
+      ctx: { channelId: "ch_1" },
+      behaviorConfig: {
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        enableMessageSendingFilter: true
+      },
+      handledResult: { decision: "handled", content: "callback-rewrite", cancel: true },
+      expectedHandled: { content: "callback-rewrite", cancel: true },
+      expectedErrorResult: { cancel: false },
+      autoCheck: (result: unknown) => {
+        expect(result).toEqual({ content: "thanks." });
+      },
+      errorLog: "[clawvault] message_sending callback returned error decision; using safe fallback"
+    }
+  ])(
+    "table-driven callback outcomes for $hookName include handled/skip/fallback_auto/error",
+    async ({ hookName, event, ctx, behaviorConfig, handledResult, expectedHandled, expectedErrorResult, autoCheck, errorLog }) => {
+      const emitRuntimeEvent = vi.fn();
+      const logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      };
+      const map = new Map<string, (...args: unknown[]) => unknown>();
+      const invokeClawVaultCallback = vi.fn(async () => handledResult);
+
+      clawvaultPlugin.register({
+        id: "clawvault",
+        name: "ClawVault",
+        logger,
+        pluginConfig: {
+          vaultPath: "/tmp/does-not-exist",
+          memoryBehaviorCallbackPolicy: "legacy",
+          ...behaviorConfig
+        },
+        registerTool: vi.fn(),
+        on: vi.fn((registeredHookName: string, handler: (...args: unknown[]) => unknown) => {
+          map.set(registeredHookName, handler);
+        }),
+        invokeClawVaultCallback,
+        emitRuntimeEvent
+      });
+
+      const hook = map.get(hookName);
+      expect(hook).toBeTypeOf("function");
+
+      const handledOutput = await hook?.(event, ctx);
+      expect(handledOutput).toEqual(expectedHandled);
+
+      invokeClawVaultCallback.mockResolvedValueOnce({ decision: "skip" });
+      const skipOutput = await hook?.(event, ctx);
+      expect(skipOutput).toBeUndefined();
+
+      invokeClawVaultCallback.mockResolvedValueOnce({ decision: "fallback_auto" });
+      const fallbackAutoOutput = await hook?.(event, ctx);
+      autoCheck(fallbackAutoOutput);
+
+      invokeClawVaultCallback.mockResolvedValueOnce({ decision: "error" });
+      const errorOutput = await hook?.(event, ctx);
+      expect(errorOutput).toEqual(expectedErrorResult);
+      expect(logger.warn).toHaveBeenCalledWith(errorLog);
+      expect(emitRuntimeEvent).toHaveBeenCalledWith(
+        "clawvault:callback_invocation",
+        expect.objectContaining({
+          trigger: hookName
+        })
+      );
+    }
+  );
+
+  it.each([
+    { policy: undefined, expectedResult: { cancel: false }, expectAuto: false, expectedWarning: "callback invocation failed" },
+    {
+      policy: "fallbackToAuto",
+      expectedResult: { content: "thanks." },
+      expectAuto: true,
+      expectedWarning: "callback policy fallbackToAuto applied"
+    },
+    {
+      policy: "skip",
+      expectedResult: undefined,
+      expectAuto: false,
+      expectedWarning: "callback policy skip applied"
+    }
+  ] as const)(
+    "policy behavior on invoker failure for message_sending: %o",
+    async ({ policy, expectedResult, expectAuto, expectedWarning }) => {
+      const logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      };
+      const map = new Map<string, (...args: unknown[]) => unknown>();
+
+      clawvaultPlugin.register({
+        id: "clawvault",
+        name: "ClawVault",
+        logger,
+        pluginConfig: {
+          vaultPath: "/tmp/does-not-exist",
+          memoryBehaviorDomains: {
+            "legacy-communication-policy": "callback"
+          },
+          enableMessageSendingFilter: true,
+          memoryBehaviorCallbackPolicy: policy
+        },
+        registerTool: vi.fn(),
+        on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+          map.set(hookName, handler);
+        }),
+        invokeClawVaultCallback: vi.fn(async () => {
+          throw new Error("forced-failure");
+        })
+      });
+
+      const messageSending = map.get("message_sending");
+      const result = await messageSending?.({ to: "ops", content: "good catch, thanks." }, { channelId: "ch_1" });
+      expect(result).toEqual(expectedResult);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(expectedWarning));
+      if (expectAuto) {
+        expect(result).toEqual({ content: "thanks." });
+      }
+    }
+  );
+
+  it("supports timeout path for callback mode with default compatibility fallback", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackTimeoutMs: 50
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback: vi.fn(() => new Promise<unknown>(() => {}))
+    });
+
+    const messageSending = map.get("message_sending");
+    const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
+    expect(result).toEqual({ cancel: false });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("callback_timeout_50ms"));
+  });
+
+  it("enforces hard-fail mode for invalid response shape and missing callback handler", async () => {
+    const mapWithInvoker = new Map<string, (...args: unknown[]) => unknown>();
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "hardFail"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        mapWithInvoker.set(hookName, handler);
+      }),
+      invokeClawVaultCallback: vi.fn(async () => ({ invalid: true }))
+    });
+
+    await expect(mapWithInvoker.get("message_sending")?.({ to: "ops", content: "hello" }, { channelId: "ch_1" })).rejects.toThrow(
+      "callback policy hardFail triggered"
+    );
+
+    const mapWithoutHandler = new Map<string, (...args: unknown[]) => unknown>();
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "hardFail"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        mapWithoutHandler.set(hookName, handler);
+      })
+    });
+
+    await expect(
+      mapWithoutHandler.get("message_sending")?.({ to: "ops", content: "hello" }, { channelId: "ch_1" })
+    ).rejects.toThrow("callback policy hardFail triggered");
+  });
+
+  it("covers lifecycle callback decisions and fallback policy behavior for gateway_start", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+    const invokeClawVaultCallback = vi.fn(async () => ({ decision: "handled" }));
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "",
+        enableStartupRecovery: true,
+        memoryBehaviorDomains: {
+          "session-memory": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "legacy"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const gatewayStart = map.get("gateway_start");
+    await gatewayStart?.({ port: 3377 }, { port: 3377 });
+    invokeClawVaultCallback.mockResolvedValueOnce({ decision: "skip" });
+    await gatewayStart?.({ port: 3377 }, { port: 3377 });
+    invokeClawVaultCallback.mockResolvedValueOnce({ decision: "error" });
+    await gatewayStart?.({ port: 3377 }, { port: 3377 });
+    expect(logger.warn).toHaveBeenCalledWith("[clawvault] gateway_start callback returned error decision; continuing safely");
+
+    invokeClawVaultCallback.mockResolvedValueOnce({ decision: "fallback_auto" });
+    await gatewayStart?.({ port: 3377 }, { port: 3377 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("No vault found, skipping startup recovery"));
+  });
 });
