@@ -21,6 +21,8 @@ const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 export type ClawVaultContextProfile = "default" | "planning" | "incident" | "handoff" | "auto";
 export type ClawVaultMemoryBehaviorMode = "off" | "auto" | "callback";
 export type ClawVaultMemoryBehaviorDomainMap = Partial<Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorMode>>;
+export type ClawVaultCallbackPolicy = "legacy" | "fallbackToAuto" | "skip" | "hardFail";
+export type ClawVaultCallbackPolicyMap = Partial<Record<ClawVaultAutomationPack, ClawVaultCallbackPolicy>>;
 export type ClawVaultMemoryBehaviorCallback = (
   payload: ClawVaultCallbackPayload
 ) => ClawVaultCallbackResult | Promise<ClawVaultCallbackResult>;
@@ -34,6 +36,8 @@ export interface ClawVaultPluginConfig {
   memoryBehaviorDomains?: ClawVaultMemoryBehaviorDomainMap;
   memoryBehaviorCallbacks?: ClawVaultMemoryBehaviorCallbackMap;
   memoryBehaviorCallbackTimeoutMs?: number;
+  memoryBehaviorCallbackPolicy?: ClawVaultCallbackPolicy;
+  memoryBehaviorCallbackPolicies?: ClawVaultCallbackPolicyMap;
   vaultPath?: string;
   agentVaults?: Record<string, string>;
   allowClawvaultExec?: boolean;
@@ -89,6 +93,10 @@ function isMemoryBehaviorMode(value: unknown): value is ClawVaultMemoryBehaviorM
   return value === "off" || value === "auto" || value === "callback";
 }
 
+function isCallbackPolicy(value: unknown): value is ClawVaultCallbackPolicy {
+  return value === "legacy" || value === "fallbackToAuto" || value === "skip" || value === "hardFail";
+}
+
 /**
  * Domain mode precedence:
  * 1) explicit memoryBehaviorDomains.<pack> mode
@@ -119,6 +127,22 @@ export function getPackBehaviorMode(
   if (!preset) return "off";
 
   return PACK_PRESET_DOMAIN_MODES[preset][pack];
+}
+
+export function getPackCallbackPolicy(
+  pluginConfig: ClawVaultPluginConfig,
+  pack: ClawVaultAutomationPack
+): ClawVaultCallbackPolicy {
+  const perPackPolicy = pluginConfig.memoryBehaviorCallbackPolicies?.[pack];
+  if (isCallbackPolicy(perPackPolicy)) {
+    return perPackPolicy;
+  }
+
+  if (isCallbackPolicy(pluginConfig.memoryBehaviorCallbackPolicy)) {
+    return pluginConfig.memoryBehaviorCallbackPolicy;
+  }
+
+  return "legacy";
 }
 
 export function isPackEnabled(pluginConfig: ClawVaultPluginConfig, pack: ClawVaultAutomationPack): boolean {
