@@ -111,6 +111,26 @@ export type PluginHookHandlerMap = {
 
 export type PluginHookName = keyof PluginHookHandlerMap;
 
+export type ClawVaultCallbackPayload = {
+  domain: string;
+  trigger: PluginHookName;
+  context: {
+    event: unknown;
+    hookContext: unknown;
+  };
+  suggestedActions: string[];
+  correlationId: string;
+};
+
+export type ClawVaultCallbackEventName = "clawvault:callback_invocation";
+
+export type ClawVaultCallbackEventEmitter = (
+  eventName: ClawVaultCallbackEventName,
+  payload: ClawVaultCallbackPayload
+) => void | Promise<void>;
+
+export type ClawVaultCallbackInvoker = (payload: ClawVaultCallbackPayload) => unknown | Promise<unknown>;
+
 export type PluginLogger = {
   info: (message: string) => void;
   warn: (message: string) => void;
@@ -142,4 +162,6 @@ export type OpenClawPluginApi = {
     handler: PluginHookHandlerMap[K],
     opts?: { priority?: number }
   ) => void;
+  emitRuntimeEvent?: ClawVaultCallbackEventEmitter;
+  invokeClawVaultCallback?: ClawVaultCallbackInvoker;
 };
