@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { OpenClawPluginApi, PluginHookAgentContext, PluginHookName } from "./openclaw-types.js";
+import type { ClawVaultCallbackPayload, OpenClawPluginApi, PluginHookAgentContext } from "./openclaw-types.js";
 import {
   CLAWVAULT_PACK_NAMES,
   PACK_FEATURE_KEYS,
@@ -16,12 +16,7 @@ const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 export type ClawVaultContextProfile = "default" | "planning" | "incident" | "handoff" | "auto";
 export type ClawVaultMemoryBehaviorMode = "off" | "auto" | "callback";
 export type ClawVaultMemoryBehaviorDomainMap = Partial<Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorMode>>;
-export type ClawVaultMemoryBehaviorCallback = (input: {
-  pack: ClawVaultAutomationPack;
-  hookName: PluginHookName;
-  event: unknown;
-  ctx: unknown;
-}) => unknown | Promise<unknown>;
+export type ClawVaultMemoryBehaviorCallback = (payload: ClawVaultCallbackPayload) => unknown | Promise<unknown>;
 export type ClawVaultMemoryBehaviorCallbackMap = Partial<Record<ClawVaultAutomationPack, ClawVaultMemoryBehaviorCallback>>;
 
 export interface ClawVaultPluginConfig {
@@ -31,6 +26,7 @@ export interface ClawVaultPluginConfig {
   packToggles?: ClawVaultPackToggleMap;
   memoryBehaviorDomains?: ClawVaultMemoryBehaviorDomainMap;
   memoryBehaviorCallbacks?: ClawVaultMemoryBehaviorCallbackMap;
+  memoryBehaviorCallbackTimeoutMs?: number;
   vaultPath?: string;
   agentVaults?: Record<string, string>;
   allowClawvaultExec?: boolean;

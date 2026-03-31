@@ -26,7 +26,12 @@ import {
   handleAgentEndHeartbeat,
   handleBeforeCompactionObservation
 } from "./plugin/hooks/observation.js";
-import type { OpenClawPluginApi, PluginHookMessageSendingResult, PluginHookName } from "./plugin/openclaw-types.js";
+import type {
+  ClawVaultCallbackPayload,
+  OpenClawPluginApi,
+  PluginHookMessageSendingResult,
+  PluginHookName
+} from "./plugin/openclaw-types.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
 import type { ClawVaultAutomationPack } from "./plugin/packs.js";
 
@@ -67,17 +72,114 @@ function getEffectiveHookConfig(
 }
 
 async function dispatchPackCallback(
+  api: OpenClawPluginApi,
   pluginConfig: ClawVaultPluginConfig,
   pack: ClawVaultAutomationPack,
   hookName: PluginHookName,
   event: unknown,
-  ctx: unknown
+  ctx: unknown,
+  sequence: number
 ): Promise<unknown> {
+  const payload = createCallbackPayload(pack, hookName, event, ctx, sequence);
+  await api.emitRuntimeEvent?.("clawvault:callback_invocation", payload);
+
+  const invokeWithTimeout = async (callback: (callbackPayload: ClawVaultCallbackPayload) => unknown | Promise<unknown>) => {
+    return withTimeout(
+      Promise.resolve(callback(payload)),
+      getCallbackTimeoutMs(pluginConfig)
+    );
+  };
+
+  if (typeof api.invokeClawVaultCallback === "function") {
+    try {
+      return await invokeWithTimeout(api.invokeClawVaultCallback);
+    } catch (error) {
+      api.logger.warn(formatCallbackFailure(pack, hookName, payload.correlationId, error));
+      return getCallbackFallback(hookName);
+    }
+  }
+
   const callback = pluginConfig.memoryBehaviorCallbacks?.[pack];
   if (typeof callback !== "function") {
     return;
   }
-  return callback({ pack, hookName, event, ctx });
+  try {
+    return await invokeWithTimeout(callback);
+  } catch (error) {
+    api.logger.warn(formatCallbackFailure(pack, hookName, payload.correlationId, error));
+    return getCallbackFallback(hookName);
+  }
+}
+
+function createCallbackPayload(
+  pack: ClawVaultAutomationPack,
+  hookName: PluginHookName,
+  event: unknown,
+  ctx: unknown,
+  sequence: number
+): ClawVaultCallbackPayload {
+  return {
+    domain: pack,
+    trigger: hookName,
+    context: {
+      event,
+      hookContext: ctx
+    },
+    suggestedActions: getSuggestedActions(hookName),
+    correlationId: `clawvault:${pack}:${hookName}:${sequence}`
+  };
+}
+
+function getSuggestedActions(hookName: PluginHookName): string[] {
+  if (hookName === "before_prompt_build") {
+    return ["prepend_system_context", "append_system_context"];
+  }
+  if (hookName === "message_sending") {
+    return ["rewrite_message", "cancel_message"];
+  }
+  return ["observe_only"];
+}
+
+function getCallbackTimeoutMs(pluginConfig: ClawVaultPluginConfig): number {
+  const configured = pluginConfig.memoryBehaviorCallbackTimeoutMs;
+  if (typeof configured !== "number" || !Number.isFinite(configured)) {
+    return 1500;
+  }
+  return Math.max(50, Math.floor(configured));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`callback_timeout_${timeoutMs}ms`));
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function formatCallbackFailure(
+  pack: ClawVaultAutomationPack,
+  hookName: PluginHookName,
+  correlationId: string,
+  error: unknown
+): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `[clawvault] callback invocation failed (${pack}:${hookName}, correlationId=${correlationId}): ${detail}`;
+}
+
+function getCallbackFallback(hookName: PluginHookName): unknown {
+  if (hookName === "message_sending") {
+    return { cancel: false } satisfies PluginHookMessageSendingResult;
+  }
+  return;
 }
 
 function mergeBeforePromptBuildResults(results: unknown[]): { prependSystemContext?: string; appendSystemContext?: string } | void {
@@ -136,6 +238,11 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
     if (pack === "capture-observation") return captureObservationMode === "auto";
     return false;
   });
+  let callbackSequence = 0;
+  const nextSequence = () => {
+    callbackSequence += 1;
+    return callbackSequence;
+  };
 
   if (sessionMemoryEnabled || communicationPolicyEnabled) {
     const builtInBeforePromptBuildHandler = createBeforePromptBuildHandler({
@@ -148,10 +255,10 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         results.push(await builtInBeforePromptBuildHandler(event, ctx));
       }
       if (sessionMemoryMode === "callback") {
-        results.push(await dispatchPackCallback(pluginConfig, "session-memory", "before_prompt_build", event, ctx));
+        results.push(await dispatchPackCallback(api, pluginConfig, "session-memory", "before_prompt_build", event, ctx, nextSequence()));
       }
       if (communicationPolicyMode === "callback") {
-        results.push(await dispatchPackCallback(pluginConfig, "legacy-communication-policy", "before_prompt_build", event, ctx));
+        results.push(await dispatchPackCallback(api, pluginConfig, "legacy-communication-policy", "before_prompt_build", event, ctx, nextSequence()));
       }
       return mergeBeforePromptBuildResults(results);
     }, { priority: 30 });
@@ -171,11 +278,13 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         return builtInMessageHandler(event, ctx);
       }
       const callbackResult = await dispatchPackCallback(
+        api,
         pluginConfig,
         "legacy-communication-policy",
         "message_sending",
         event,
-        ctx
+        ctx,
+        nextSequence()
       );
       if (!callbackResult || typeof callbackResult !== "object") {
         return;
@@ -195,13 +304,13 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "session-memory", "gateway_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "session-memory", "gateway_start", event, ctx, nextSequence());
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "gateway_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "gateway_start", event, ctx, nextSequence());
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "reflection-maintenance", "gateway_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "gateway_start", event, ctx, nextSequence());
       }
     });
 
@@ -214,13 +323,13 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "session-memory", "session_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "session-memory", "session_start", event, ctx, nextSequence());
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "session_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_start", event, ctx, nextSequence());
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "reflection-maintenance", "session_start", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_start", event, ctx, nextSequence());
       }
     });
 
@@ -233,13 +342,13 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "session-memory", "session_end", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "session-memory", "session_end", event, ctx, nextSequence());
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "session_end", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "session_end", event, ctx, nextSequence());
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "reflection-maintenance", "session_end", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_end", event, ctx, nextSequence());
       }
     });
 
@@ -252,13 +361,13 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (sessionMemoryMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "session-memory", "before_reset", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "session-memory", "before_reset", event, ctx, nextSequence());
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "before_reset", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_reset", event, ctx, nextSequence());
       }
       if (reflectionMaintenanceMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "reflection-maintenance", "before_reset", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "before_reset", event, ctx, nextSequence());
       }
     });
   }
@@ -273,7 +382,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "before_compaction", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "before_compaction", event, ctx, nextSequence());
       }
     });
 
@@ -285,7 +394,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         });
       }
       if (captureObservationMode === "callback") {
-        await dispatchPackCallback(pluginConfig, "capture-observation", "agent_end", event, ctx);
+        await dispatchPackCallback(api, pluginConfig, "capture-observation", "agent_end", event, ctx, nextSequence());
       }
     });
   }

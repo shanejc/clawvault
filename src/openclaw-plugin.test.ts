@@ -32,16 +32,17 @@ describe("openclaw plugin registration", () => {
     const hookNames: string[] = [];
     const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
     const registerTool = vi.fn();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
 
     const api = {
       id: "clawvault",
       name: "ClawVault",
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn()
-      },
+      logger,
       pluginConfig: {
         vaultPath: "/tmp/does-not-exist",
         ...pluginConfig
@@ -59,7 +60,8 @@ describe("openclaw plugin registration", () => {
       result,
       hookNames,
       hookHandlers,
-      registerTool
+      registerTool,
+      logger
     };
   }
 
@@ -141,8 +143,130 @@ describe("openclaw plugin registration", () => {
 
     const result = await beforePromptBuild?.({ prompt: "status?", messages: [] }, {});
     expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback.mock.calls[0]?.[0]).toMatchObject({
+      domain: "session-memory",
+      trigger: "before_prompt_build",
+      context: {
+        event: { prompt: "status?", messages: [] },
+        hookContext: {}
+      },
+      suggestedActions: ["prepend_system_context", "append_system_context"]
+    });
+    expect((callback.mock.calls[0]?.[0] as { correlationId?: string }).correlationId).toMatch(
+      /^clawvault:session-memory:before_prompt_build:\d+$/
+    );
     expect(result).toEqual({ prependSystemContext: "callback-mode-context", appendSystemContext: undefined });
     expect((result as { prependSystemContext?: string }).prependSystemContext).not.toContain("ClawVault Memory Recall Guidance");
+  });
+
+  it("prefers API callback invoker when provided and emits runtime callback events", async () => {
+    const invokeClawVaultCallback = vi.fn(async () => ({ prependSystemContext: "from-api" }));
+    const emitRuntimeEvent = vi.fn();
+    const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "session-memory": "callback"
+        },
+        memoryBehaviorCallbacks: {
+          "session-memory": vi.fn(async () => ({ prependSystemContext: "from-config-callback" }))
+        }
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        hookHandlers.set(hookName, handler);
+      }),
+      emitRuntimeEvent,
+      invokeClawVaultCallback
+    });
+
+    const beforePromptBuild = hookHandlers.get("before_prompt_build");
+    const result = await beforePromptBuild?.({ prompt: "status?", messages: [] }, {});
+    expect(invokeClawVaultCallback).toHaveBeenCalledTimes(1);
+    expect(emitRuntimeEvent).toHaveBeenCalledWith(
+      "clawvault:callback_invocation",
+      expect.objectContaining({
+        domain: "session-memory",
+        trigger: "before_prompt_build"
+      })
+    );
+    expect(result).toEqual({ prependSystemContext: "from-api", appendSystemContext: undefined });
+  });
+
+  it("uses deterministic fallback when callback invocation fails or times out", async () => {
+    const invokeClawVaultCallback = vi.fn(async () => {
+      throw new Error("forced-failure");
+    });
+    const { logger } = registerWithConfig();
+
+    // Re-register with explicit API invoker to drive timeout path.
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackTimeoutMs: 1
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const messageSending = map.get("message_sending");
+    const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
+    expect(result).toEqual({ cancel: false });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("callback invocation failed"));
+  });
+
+  it("applies timeout fallback for stalled callback invocations", async () => {
+    const invokeClawVaultCallback = vi.fn(() => new Promise<unknown>(() => {}));
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackTimeoutMs: 50
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const messageSending = map.get("message_sending");
+    const started = Date.now();
+    const result = await messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45);
+    expect(result).toEqual({ cancel: false });
   });
 
   it("does not dispatch callbacks when the pack/domain is off", async () => {
