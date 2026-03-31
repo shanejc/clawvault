@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPackBehaviorMode, isFeatureEnabled, isPackEnabled } from "./config.js";
+import { getPackBehaviorMode, getPackCallbackPolicy, isFeatureEnabled, isPackEnabled } from "./config.js";
 import type { ClawVaultPluginConfig } from "./config.js";
 
 /*
@@ -126,5 +126,18 @@ describe("pack-aware config behavior", () => {
 
     expect(isFeatureEnabled(config, "enableBeforePromptRecall", false)).toBe(true);
     expect(isFeatureEnabled(config, "enableStrictBeforePromptRecall", false)).toBe(false);
+  });
+
+  it("resolves callback policy from global and per-pack overrides", () => {
+    const config: ClawVaultPluginConfig = {
+      memoryBehaviorCallbackPolicy: "fallbackToAuto",
+      memoryBehaviorCallbackPolicies: {
+        "capture-observation": "hardFail"
+      }
+    };
+
+    expect(getPackCallbackPolicy(config, "session-memory")).toBe("fallbackToAuto");
+    expect(getPackCallbackPolicy(config, "capture-observation")).toBe("hardFail");
+    expect(getPackCallbackPolicy({}, "legacy-communication-policy")).toBe("legacy");
   });
 });

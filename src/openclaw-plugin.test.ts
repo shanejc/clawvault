@@ -302,6 +302,72 @@ describe("openclaw plugin registration", () => {
     expect(result).toEqual({ cancel: false });
   });
 
+  it("supports fallbackToAuto policy when callback invocation fails", async () => {
+    const invokeClawVaultCallback = vi.fn(async () => {
+      throw new Error("forced-failure");
+    });
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "session-memory": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "fallbackToAuto",
+        enableBeforePromptRecall: true
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      }),
+      invokeClawVaultCallback
+    });
+
+    const beforePromptBuild = map.get("before_prompt_build");
+    const result = await beforePromptBuild?.({ prompt: "hello", messages: [] }, {});
+    expect((result as { prependSystemContext?: string } | undefined)?.prependSystemContext).toContain("ClawVault Memory Recall Guidance");
+  });
+
+  it("throws with hardFail policy when callback handler is required but missing", async () => {
+    const map = new Map<string, (...args: unknown[]) => unknown>();
+
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist",
+        memoryBehaviorDomains: {
+          "legacy-communication-policy": "callback"
+        },
+        memoryBehaviorCallbackPolicy: "hardFail"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
+        map.set(hookName, handler);
+      })
+    });
+
+    const messageSending = map.get("message_sending");
+    await expect(messageSending?.({ to: "ops", content: "hello" }, { channelId: "ch_1" })).rejects.toThrow(
+      "callback policy hardFail triggered"
+    );
+  });
+
   it("does not dispatch callbacks when the pack/domain is off", async () => {
     const callback = vi.fn();
     const { hookNames } = registerWithConfig({
