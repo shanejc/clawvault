@@ -111,6 +111,51 @@ export type PluginHookHandlerMap = {
 
 export type PluginHookName = keyof PluginHookHandlerMap;
 
+export const CLAWVAULT_CALLBACK_DECISION = {
+  Handled: "handled",
+  Skip: "skip",
+  FallbackAuto: "fallback_auto",
+  Error: "error"
+} as const;
+
+export type ClawVaultCallbackDecision =
+  typeof CLAWVAULT_CALLBACK_DECISION[keyof typeof CLAWVAULT_CALLBACK_DECISION];
+
+type ClawVaultCallbackResultBase = {
+  decision: ClawVaultCallbackDecision;
+  reason?: string;
+};
+
+export type ClawVaultBeforePromptBuildCallbackResult = ClawVaultCallbackResultBase & {
+  prependSystemContext?: string;
+  appendSystemContext?: string;
+  prependContext?: string;
+  systemPrompt?: string;
+};
+
+export type ClawVaultMessageSendingCallbackResult = ClawVaultCallbackResultBase & {
+  content?: string;
+  cancel?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type ClawVaultLifecycleCallbackResult = ClawVaultCallbackResultBase & {
+  note?: string;
+};
+
+export type ClawVaultCallbackResultMap = {
+  before_prompt_build: ClawVaultBeforePromptBuildCallbackResult;
+  message_sending: ClawVaultMessageSendingCallbackResult;
+  session_start: ClawVaultLifecycleCallbackResult;
+  session_end: ClawVaultLifecycleCallbackResult;
+  gateway_start: ClawVaultLifecycleCallbackResult;
+  before_reset: ClawVaultLifecycleCallbackResult;
+  before_compaction: ClawVaultLifecycleCallbackResult;
+  agent_end: ClawVaultLifecycleCallbackResult;
+};
+
+export type ClawVaultCallbackResult = ClawVaultCallbackResultMap[PluginHookName];
+
 export type ClawVaultCallbackPayload = {
   domain: string;
   trigger: PluginHookName;
