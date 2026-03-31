@@ -222,6 +222,28 @@ Includes behaviors such as:
 
 These are clearly beyond the substrate because they embody autonomous processing policies.
 
+**Current hook entry points and mode semantics**
+
+Reflection-maintenance behavior is wired through lifecycle hooks in the OpenClaw plugin layer:
+
+- `gateway_start`
+- `session_start`
+- `session_end`
+- `before_reset`
+
+Mode behavior:
+
+- `off`: no reflection-maintenance hook activity.
+- `auto`: built-in lifecycle handlers run; weekly reflection checks are currently triggered via `session_start`.
+- `callback`: host callback decides orchestration through explicit structured outcomes, not policy text parsing.
+
+Callback orchestration outcomes for reflection/distillation:
+
+- `local_run_approved`: run local lifecycle fallback and record orchestration event.
+- `delegated_event`: do not run local fallback; emit orchestration event for external handling.
+- `queued_for_approval`: do not run local fallback; emit orchestration event for approval queueing.
+- `skipped`: explicit no-op outcome (also default when omitted).
+
 #### D. Legacy communication policy pack
 
 Focus: preserving older policy-shaped plugin behavior for teams that want it.

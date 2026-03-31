@@ -30,6 +30,7 @@ import type {
   ClawVaultCallbackDecision,
   ClawVaultCallbackPayload,
   ClawVaultCallbackResultMap,
+  ClawVaultDistillationOrchestrationPayload,
   ClawVaultSuggestedActionMap,
   OpenClawPluginApi,
   PluginHookBeforePromptBuildResult,
@@ -312,6 +313,7 @@ function parseCallbackDecision<K extends PluginHookName>(
     decision,
     observe: getOptionalBooleanField(value, "observe", details, hookName),
     triggerLifecycleAction: getOptionalBooleanField(value, "triggerLifecycleAction", details, hookName),
+    distillationOutcome: getOptionalDistillationOutcomeField(value, "distillationOutcome", details, hookName),
     note: getOptionalStringField(value, "note", details, hookName)
   } as ClawVaultCallbackResultMap[K];
 }
@@ -346,15 +348,37 @@ function getOptionalBooleanField<K extends PluginHookName>(
   return undefined;
 }
 
+function getOptionalDistillationOutcomeField<K extends PluginHookName>(
+  source: Record<string, unknown>,
+  fieldName: string,
+  details: { logger: (message: string) => void; pack: ClawVaultAutomationPack; correlationId: string },
+  hookName: K
+): "local_run_approved" | "delegated_event" | "queued_for_approval" | "skipped" | undefined {
+  const value = source[fieldName];
+  if (value === undefined) return undefined;
+  if (
+    value === "local_run_approved"
+    || value === "delegated_event"
+    || value === "queued_for_approval"
+    || value === "skipped"
+  ) {
+    return value;
+  }
+  details.logger(
+    `[clawvault] unsupported callback field value ${fieldName} (${details.pack}:${hookName}, correlationId=${details.correlationId}); ignoring`
+  );
+  return undefined;
+}
+
 const ALLOWED_CALLBACK_RESULT_FIELDS: { [K in PluginHookName]: readonly string[] } = {
   before_prompt_build: ["decision", "reason", "prependSystemContext", "appendSystemContext", "prependContext", "systemPrompt"],
   message_sending: ["decision", "reason", "content", "cancel"],
-  session_start: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
-  session_end: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
-  gateway_start: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
-  before_reset: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
-  before_compaction: ["decision", "reason", "observe", "triggerLifecycleAction", "note"],
-  agent_end: ["decision", "reason", "observe", "triggerLifecycleAction", "note"]
+  session_start: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"],
+  session_end: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"],
+  gateway_start: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"],
+  before_reset: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"],
+  before_compaction: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"],
+  agent_end: ["decision", "reason", "observe", "triggerLifecycleAction", "distillationOutcome", "note"]
 };
 
 function logUnsupportedCallbackFields<K extends PluginHookName>(
@@ -555,6 +579,11 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
 
   if (sessionMemoryEnabled || captureObservationEnabled || reflectionMaintenanceEnabled) {
     const lifecycleConfig = getEffectiveHookConfig(pluginConfig, lifecycleAutoPacks);
+    const emitDistillationOrchestrationEvent = async (
+      payload: ClawVaultDistillationOrchestrationPayload
+    ): Promise<void> => {
+      await api.emitRuntimeEvent?.("clawvault:distillation_orchestration", payload);
+    };
 
     const runLifecycleAutoFallback = async (hookName: "gateway_start" | "session_start" | "session_end" | "before_reset", event: unknown, ctx: unknown) => {
       if (hookName === "gateway_start") {
@@ -597,6 +626,43 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
       }
     };
 
+    const applyReflectionDistillationOrchestration = async (
+      hookName: "gateway_start" | "session_start" | "session_end" | "before_reset",
+      callback: ClawVaultCallbackResultMap["session_start"],
+      correlationId: string,
+      event: unknown,
+      ctx: unknown
+    ) => {
+      const outcome = callback.distillationOutcome ?? "skipped";
+      if (outcome === "local_run_approved") {
+        await runLifecycleAutoFallback(hookName, event, ctx);
+        await emitDistillationOrchestrationEvent({
+          domain: "reflection-maintenance",
+          trigger: hookName,
+          correlationId,
+          outcome,
+          note: callback.note
+        });
+        return;
+      }
+
+      await emitDistillationOrchestrationEvent({
+        domain: "reflection-maintenance",
+        trigger: hookName,
+        correlationId,
+        outcome,
+        note: callback.note
+      });
+
+      if (outcome === "delegated_event") {
+        api.logger.info(`[clawvault] reflection-maintenance delegated distillation (${hookName}, correlationId=${correlationId})`);
+      } else if (outcome === "queued_for_approval") {
+        api.logger.info(`[clawvault] reflection-maintenance queued distillation for approval (${hookName}, correlationId=${correlationId})`);
+      } else {
+        api.logger.info(`[clawvault] reflection-maintenance distillation skipped (${hookName}, correlationId=${correlationId})`);
+      }
+    };
+
     api.on("gateway_start", async (event, ctx) => {
       if (lifecycleAutoPacks.length > 0) {
         await handleGatewayStart(event, ctx, {
@@ -622,12 +688,17 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         await applyLifecycleCallbackDecision(decision, "gateway_start", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "gateway_start", event, ctx, nextSequence());
+        const sequence = nextSequence();
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "gateway_start", event, ctx, sequence);
         const decision = applyNonHandledDecisionPolicy(callback.decision, "gateway_start", reflectionMaintenanceCallbackPolicy, {
           logger: api.logger,
           pack: "reflection-maintenance"
         });
-        await applyLifecycleCallbackDecision(decision, "gateway_start", event, ctx);
+        if (decision === "handled") {
+          await applyReflectionDistillationOrchestration("gateway_start", callback, `clawvault:reflection-maintenance:gateway_start:${sequence}`, event, ctx);
+        } else {
+          await applyLifecycleCallbackDecision(decision, "gateway_start", event, ctx);
+        }
       }
     });
 
@@ -656,12 +727,17 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         await applyLifecycleCallbackDecision(decision, "session_start", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_start", event, ctx, nextSequence());
+        const sequence = nextSequence();
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_start", event, ctx, sequence);
         const decision = applyNonHandledDecisionPolicy(callback.decision, "session_start", reflectionMaintenanceCallbackPolicy, {
           logger: api.logger,
           pack: "reflection-maintenance"
         });
-        await applyLifecycleCallbackDecision(decision, "session_start", event, ctx);
+        if (decision === "handled") {
+          await applyReflectionDistillationOrchestration("session_start", callback, `clawvault:reflection-maintenance:session_start:${sequence}`, event, ctx);
+        } else {
+          await applyLifecycleCallbackDecision(decision, "session_start", event, ctx);
+        }
       }
     });
 
@@ -690,12 +766,17 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         await applyLifecycleCallbackDecision(decision, "session_end", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_end", event, ctx, nextSequence());
+        const sequence = nextSequence();
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "session_end", event, ctx, sequence);
         const decision = applyNonHandledDecisionPolicy(callback.decision, "session_end", reflectionMaintenanceCallbackPolicy, {
           logger: api.logger,
           pack: "reflection-maintenance"
         });
-        await applyLifecycleCallbackDecision(decision, "session_end", event, ctx);
+        if (decision === "handled") {
+          await applyReflectionDistillationOrchestration("session_end", callback, `clawvault:reflection-maintenance:session_end:${sequence}`, event, ctx);
+        } else {
+          await applyLifecycleCallbackDecision(decision, "session_end", event, ctx);
+        }
       }
     });
 
@@ -724,12 +805,17 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         await applyLifecycleCallbackDecision(decision, "before_reset", event, ctx);
       }
       if (reflectionMaintenanceMode === "callback") {
-        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "before_reset", event, ctx, nextSequence());
+        const sequence = nextSequence();
+        const callback = await dispatchPackCallback(api, pluginConfig, "reflection-maintenance", "before_reset", event, ctx, sequence);
         const decision = applyNonHandledDecisionPolicy(callback.decision, "before_reset", reflectionMaintenanceCallbackPolicy, {
           logger: api.logger,
           pack: "reflection-maintenance"
         });
-        await applyLifecycleCallbackDecision(decision, "before_reset", event, ctx);
+        if (decision === "handled") {
+          await applyReflectionDistillationOrchestration("before_reset", callback, `clawvault:reflection-maintenance:before_reset:${sequence}`, event, ctx);
+        } else {
+          await applyLifecycleCallbackDecision(decision, "before_reset", event, ctx);
+        }
       }
     });
   }
