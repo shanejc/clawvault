@@ -114,6 +114,33 @@ describe("openclaw plugin registration", () => {
     expect(secondApi.emitRuntimeEvent).toHaveBeenCalledTimes(0);
   });
 
+  it("suppresses repeated onboarding prompts when re-registering the same API object", async () => {
+    const api = {
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn()
+    };
+
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
+
+    expect(api.logger.info).toHaveBeenCalledTimes(1);
+    expect(api.emitRuntimeEvent).toHaveBeenCalledTimes(1);
+  });
+
   it("logs a warning when onboarding runtime event emission fails", async () => {
     const logger = {
       info: vi.fn(),
