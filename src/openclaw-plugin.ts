@@ -938,7 +938,10 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
   api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
-  void maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
+  void maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState).catch((error) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    api.logger.warn(`[clawvault] failed to emit onboarding prompt/event: ${detail}`);
+  });
 
   if (isAutomationModeEnabled(pluginConfig)) {
     registerAutomationHooks(api, {

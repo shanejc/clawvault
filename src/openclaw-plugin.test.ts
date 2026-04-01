@@ -106,6 +106,33 @@ describe("openclaw plugin registration", () => {
     expect(api.emitRuntimeEvent).toHaveBeenCalledTimes(1);
   });
 
+  it("logs a warning when onboarding runtime event emission fails", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn(async () => {
+        throw new Error("emit-failed");
+      })
+    });
+
+    await new Promise<void>((resolve) => {
+      setImmediate(() => resolve());
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("failed to emit onboarding prompt/event: emit-failed"));
+  });
+
   it("registers substrate synchronously by default", () => {
     const { result } = registerWithConfig();
 
