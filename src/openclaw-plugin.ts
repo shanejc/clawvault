@@ -51,6 +51,7 @@ const AUTOMATION_PACKS: readonly ClawVaultAutomationPack[] = [
   "reflection-maintenance",
   "legacy-communication-policy"
 ] as const;
+const RUNTIME_STATE_BY_API = new WeakMap<OpenClawPluginApi, ClawVaultPluginRuntimeState>();
 
 function getEffectiveHookConfig(
   pluginConfig: ClawVaultPluginConfig,
@@ -907,7 +908,8 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
   plugins: { slots: { memory: ClawVaultMemoryManager } };
 } {
   const pluginConfig = readPluginConfig(api);
-  const runtimeState = new ClawVaultPluginRuntimeState();
+  const runtimeState = RUNTIME_STATE_BY_API.get(api) ?? new ClawVaultPluginRuntimeState();
+  RUNTIME_STATE_BY_API.set(api, runtimeState);
   const memoryManager = new ClawVaultMemoryManager({
     pluginConfig,
     defaultAgentId: "main",
@@ -973,4 +975,4 @@ const clawvaultPlugin = {
 };
 
 export default clawvaultPlugin;
-export { createMemorySlotPlugin, maybeEmitOnboardingRequiredPrompt };
+export { createMemorySlotPlugin };

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import clawvaultPlugin, { maybeEmitOnboardingRequiredPrompt } from "./openclaw-plugin.js";
+import clawvaultPlugin from "./openclaw-plugin.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
-import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 
 /*
 Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
@@ -81,31 +80,30 @@ describe("openclaw plugin registration", () => {
   });
 
   it("suppresses repeated onboarding prompt emissions after first prompt in runtime state", async () => {
-    const logger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn()
-    };
-    const emitRuntimeEvent = vi.fn();
-    const runtimeState = new ClawVaultPluginRuntimeState();
     const api = {
       id: "clawvault",
       name: "ClawVault",
-      logger,
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
       registerTool: vi.fn(),
-      on: vi.fn(),
-      emitRuntimeEvent
-    };
-    const pluginConfig: ClawVaultPluginConfig = {
-      vaultPath: "/tmp/does-not-exist"
+      on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn()
     };
 
-    await maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
-    await maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
 
-    expect(logger.info).toHaveBeenCalledTimes(1);
-    expect(emitRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(api.logger.info).toHaveBeenCalledTimes(1);
+    expect(api.emitRuntimeEvent).toHaveBeenCalledTimes(1);
   });
 
   it("registers substrate synchronously by default", () => {
