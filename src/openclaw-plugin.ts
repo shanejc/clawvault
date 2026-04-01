@@ -449,6 +449,29 @@ function isAutomationModeEnabled(pluginConfig: ClawVaultPluginConfig): boolean {
   return AUTOMATION_PACKS.some((pack) => isPackEnabled(pluginConfig, pack));
 }
 
+async function maybeEmitOnboardingRequiredPrompt(
+  api: OpenClawPluginApi,
+  pluginConfig: ClawVaultPluginConfig,
+  runtimeState: ClawVaultPluginRuntimeState
+): Promise<void> {
+  if (pluginConfig.packPreset || pluginConfig.automationPreset) {
+    return;
+  }
+  if (!runtimeState.shouldPromptOnboarding()) {
+    return;
+  }
+
+  runtimeState.markOnboardingPrompted();
+  api.logger.info(
+    "[clawvault] OpenClaw preset is unset (packPreset/automationPreset). Run `clawvault openclaw onboard` to complete first-run setup."
+  );
+  await api.emitRuntimeEvent?.("clawvault:onboarding_required", {
+    reason: "missing_pack_preset",
+    configPaths: ["packPreset", "automationPreset"],
+    command: "clawvault openclaw onboard"
+  });
+}
+
 function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDependencies): void {
   const { pluginConfig, runtimeState, memoryManager } = deps;
   const sessionMemoryMode = getPackBehaviorMode(pluginConfig, "session-memory");
@@ -913,6 +936,7 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
   api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
+  void maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
 
   if (isAutomationModeEnabled(pluginConfig)) {
     registerAutomationHooks(api, {
@@ -949,4 +973,4 @@ const clawvaultPlugin = {
 };
 
 export default clawvaultPlugin;
-export { createMemorySlotPlugin };
+export { createMemorySlotPlugin, maybeEmitOnboardingRequiredPrompt };

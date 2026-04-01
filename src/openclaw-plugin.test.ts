@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import clawvaultPlugin from "./openclaw-plugin.js";
+import clawvaultPlugin, { maybeEmitOnboardingRequiredPrompt } from "./openclaw-plugin.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
+import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 
 /*
 Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
@@ -48,6 +49,7 @@ describe("openclaw plugin registration", () => {
         ...pluginConfig
       },
       registerTool,
+      emitRuntimeEvent: vi.fn(),
       on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
         hookNames.push(hookName);
         hookHandlers.set(hookName, handler);
@@ -61,9 +63,50 @@ describe("openclaw plugin registration", () => {
       hookNames,
       hookHandlers,
       registerTool,
-      logger
+      logger,
+      emitRuntimeEvent: api.emitRuntimeEvent
     };
   }
+
+  it("emits first-run onboarding prompt/event when pack preset is unset", async () => {
+    const { logger, emitRuntimeEvent } = registerWithConfig({});
+    await Promise.resolve();
+
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Run `clawvault openclaw onboard`"));
+    expect(emitRuntimeEvent).toHaveBeenCalledWith("clawvault:onboarding_required", {
+      reason: "missing_pack_preset",
+      configPaths: ["packPreset", "automationPreset"],
+      command: "clawvault openclaw onboard"
+    });
+  });
+
+  it("suppresses repeated onboarding prompt emissions after first prompt in runtime state", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const emitRuntimeEvent = vi.fn();
+    const runtimeState = new ClawVaultPluginRuntimeState();
+    const api = {
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      registerTool: vi.fn(),
+      on: vi.fn(),
+      emitRuntimeEvent
+    };
+    const pluginConfig: ClawVaultPluginConfig = {
+      vaultPath: "/tmp/does-not-exist"
+    };
+
+    await maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
+    await maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState);
+
+    expect(logger.info).toHaveBeenCalledTimes(1);
+    expect(emitRuntimeEvent).toHaveBeenCalledTimes(1);
+  });
 
   it("registers substrate synchronously by default", () => {
     const { result } = registerWithConfig();

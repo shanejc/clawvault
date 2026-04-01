@@ -318,6 +318,12 @@ clawvault openclaw onboard thin
 clawvault openclaw onboard legacy --force
 ```
 
+First-run trigger behavior is exact:
+
+- Triggered during plugin registration only when both `packPreset` and legacy `automationPreset` are unset.
+- Plugin emits a setup log message and runtime event (`clawvault:onboarding_required`) that points to `clawvault openclaw onboard`.
+- Emission is one-time per plugin runtime process to avoid repeated prompt spam.
+
 You can still set mode directly with the helper command:
 
 ```bash

@@ -209,7 +209,8 @@ export type ClawVaultCallbackPayloadFor<K extends PluginHookName> = ClawVaultCal
 
 export type ClawVaultCallbackEventName =
   | "clawvault:callback_invocation"
-  | "clawvault:distillation_orchestration";
+  | "clawvault:distillation_orchestration"
+  | "clawvault:onboarding_required";
 
 export type ClawVaultDistillationOrchestrationPayload = {
   domain: "reflection-maintenance";
@@ -219,9 +220,15 @@ export type ClawVaultDistillationOrchestrationPayload = {
   note?: string;
 };
 
+export type ClawVaultOnboardingRequiredPayload = {
+  reason: "missing_pack_preset";
+  configPaths: readonly ["packPreset", "automationPreset"];
+  command: "clawvault openclaw onboard";
+};
+
 export type ClawVaultCallbackEventEmitter = (
   eventName: ClawVaultCallbackEventName,
-  payload: ClawVaultCallbackPayload | ClawVaultDistillationOrchestrationPayload
+  payload: ClawVaultCallbackPayload | ClawVaultDistillationOrchestrationPayload | ClawVaultOnboardingRequiredPayload
 ) => void | Promise<void>;
 
 export type ClawVaultCallbackInvoker = (payload: ClawVaultCallbackPayload) => unknown | Promise<unknown>;

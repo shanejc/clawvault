@@ -295,6 +295,12 @@ On first run, the plugin should explain:
 
 The setup flow should then ask the user which operating mode they want.
 
+**Registration trigger detail (implementation contract):**
+
+- First-run selection is considered **missing** when both `pluginConfig.packPreset` and `pluginConfig.automationPreset` are unset during plugin registration.
+- When missing, registration emits a one-time setup prompt directing users to run `clawvault openclaw onboard`.
+- A runtime marker suppresses repeated prompts/events for the same plugin runtime process.
+
 ### Presets
 
 #### Thin / Agent-driven

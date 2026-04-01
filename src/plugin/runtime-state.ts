@@ -8,6 +8,7 @@ export class ClawVaultPluginRuntimeState {
   private startupRecoveryNotice: string | null = null;
   private readonly sessionContextByKey = new Map<string, SessionContextCacheEntry>();
   private lastWeeklyReflectionWeekKey: string | null = null;
+  private onboardingPrompted = false;
 
   setStartupRecoveryNotice(message: string): void {
     const trimmed = message.trim();
@@ -52,5 +53,13 @@ export class ClawVaultPluginRuntimeState {
 
   markWeeklyReflectionRun(weekKey: string): void {
     this.lastWeeklyReflectionWeekKey = weekKey;
+  }
+
+  shouldPromptOnboarding(): boolean {
+    return !this.onboardingPrompted;
+  }
+
+  markOnboardingPrompted(): void {
+    this.onboardingPrompted = true;
   }
 }
