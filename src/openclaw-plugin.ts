@@ -52,6 +52,15 @@ const AUTOMATION_PACKS: readonly ClawVaultAutomationPack[] = [
   "legacy-communication-policy"
 ] as const;
 const RUNTIME_STATE_BY_API = new WeakMap<OpenClawPluginApi, ClawVaultPluginRuntimeState>();
+const ONBOARDING_PROMPTED_PROCESS_KEY = "__clawvaultOnboardingPromptedInProcess";
+
+function isOnboardingPromptedInProcess(): boolean {
+  return (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] === true;
+}
+
+function markOnboardingPromptedInProcess(): void {
+  (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] = true;
+}
 
 function getEffectiveHookConfig(
   pluginConfig: ClawVaultPluginConfig,
@@ -458,11 +467,16 @@ async function maybeEmitOnboardingRequiredPrompt(
   if (pluginConfig.packPreset || pluginConfig.automationPreset) {
     return;
   }
+  if (isOnboardingPromptedInProcess()) {
+    runtimeState.markOnboardingPrompted();
+    return;
+  }
   if (!runtimeState.shouldPromptOnboarding()) {
     return;
   }
 
   runtimeState.markOnboardingPrompted();
+  markOnboardingPromptedInProcess();
   api.logger.info(
     "[clawvault] OpenClaw preset is unset (packPreset/automationPreset). Run `clawvault openclaw onboard` to complete first-run setup."
   );

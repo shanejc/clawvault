@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import clawvaultPlugin from "./openclaw-plugin.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
 
@@ -16,6 +16,10 @@ memory_write_vault, memory_write_boot, memory_capture_source, memory_update, mem
 */
 
 describe("openclaw plugin registration", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).__clawvaultOnboardingPromptedInProcess = false;
+  });
+
   const expectedToolNames = [
     "memory_search",
     "memory_get",
@@ -79,8 +83,8 @@ describe("openclaw plugin registration", () => {
     });
   });
 
-  it("suppresses repeated onboarding prompt emissions after first prompt in runtime state", async () => {
-    const api = {
+  it("suppresses onboarding prompts across re-registration with new API objects in the same process", async () => {
+    const createApi = () => ({
       id: "clawvault",
       name: "ClawVault",
       logger: {
@@ -95,15 +99,19 @@ describe("openclaw plugin registration", () => {
       registerTool: vi.fn(),
       on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
       emitRuntimeEvent: vi.fn()
-    };
+    });
+    const firstApi = createApi();
+    const secondApi = createApi();
 
-    clawvaultPlugin.register(api);
+    clawvaultPlugin.register(firstApi);
     await Promise.resolve();
-    clawvaultPlugin.register(api);
+    clawvaultPlugin.register(secondApi);
     await Promise.resolve();
 
-    expect(api.logger.info).toHaveBeenCalledTimes(1);
-    expect(api.emitRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(firstApi.logger.info).toHaveBeenCalledTimes(1);
+    expect(secondApi.logger.info).toHaveBeenCalledTimes(0);
+    expect(firstApi.emitRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(secondApi.emitRuntimeEvent).toHaveBeenCalledTimes(0);
   });
 
   it("logs a warning when onboarding runtime event emission fails", async () => {
