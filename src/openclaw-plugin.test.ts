@@ -83,6 +83,16 @@ describe("openclaw plugin registration", () => {
     });
   });
 
+  it("skips onboarding prompt/event when non-preset automation config is already explicit", async () => {
+    const { logger, emitRuntimeEvent } = registerWithConfig({
+      automationMode: true
+    });
+    await Promise.resolve();
+
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("clawvault openclaw onboard"));
+    expect(emitRuntimeEvent).not.toHaveBeenCalledWith("clawvault:onboarding_required", expect.anything());
+  });
+
   it("suppresses onboarding prompts across re-registration with new API objects in the same process", async () => {
     const createApi = () => ({
       id: "clawvault",

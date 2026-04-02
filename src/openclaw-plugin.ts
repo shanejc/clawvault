@@ -53,6 +53,23 @@ const AUTOMATION_PACKS: readonly ClawVaultAutomationPack[] = [
 ] as const;
 const RUNTIME_STATE_BY_API = new WeakMap<OpenClawPluginApi, ClawVaultPluginRuntimeState>();
 const ONBOARDING_PROMPTED_PROCESS_KEY = "__clawvaultOnboardingPromptedInProcess";
+const LEGACY_AUTOMATION_CONFIG_KEYS: ReadonlyArray<keyof ClawVaultPluginConfig> = [
+  "enableStartupRecovery",
+  "enableSessionContextInjection",
+  "enableAutoCheckpoint",
+  "enableObserveOnNew",
+  "enableHeartbeatObservation",
+  "enableCompactionObservation",
+  "enableWeeklyReflection",
+  "enableFactExtraction",
+  "autoCheckpoint",
+  "observeOnHeartbeat",
+  "weeklyReflection",
+  "enableBeforePromptRecall",
+  "enableStrictBeforePromptRecall",
+  "enforceCommunicationProtocol",
+  "enableMessageSendingFilter"
+];
 
 function isOnboardingPromptedInProcess(): boolean {
   return (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] === true;
@@ -60,6 +77,32 @@ function isOnboardingPromptedInProcess(): boolean {
 
 function markOnboardingPromptedInProcess(): void {
   (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] = true;
+}
+
+function hasExplicitAutomationConfig(pluginConfig: ClawVaultPluginConfig): boolean {
+  if (typeof pluginConfig.automationMode === "boolean") {
+    return true;
+  }
+
+  const explicitPackToggleEntries = pluginConfig.packToggles
+    ? Object.values(pluginConfig.packToggles).filter((value) => typeof value === "boolean")
+    : [];
+  if (explicitPackToggleEntries.length > 0) {
+    return true;
+  }
+
+  const explicitDomainModeEntries = pluginConfig.memoryBehaviorDomains
+    ? Object.values(pluginConfig.memoryBehaviorDomains).filter((value) => value === "off" || value === "auto" || value === "callback")
+    : [];
+  if (explicitDomainModeEntries.length > 0) {
+    return true;
+  }
+
+  if (LEGACY_AUTOMATION_CONFIG_KEYS.some((key) => typeof pluginConfig[key] === "boolean")) {
+    return true;
+  }
+
+  return false;
 }
 
 function getEffectiveHookConfig(
@@ -465,6 +508,9 @@ async function maybeEmitOnboardingRequiredPrompt(
   runtimeState: ClawVaultPluginRuntimeState
 ): Promise<void> {
   if (pluginConfig.packPreset || pluginConfig.automationPreset) {
+    return;
+  }
+  if (hasExplicitAutomationConfig(pluginConfig)) {
     return;
   }
   if (isOnboardingPromptedInProcess()) {

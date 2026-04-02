@@ -320,7 +320,7 @@ clawvault openclaw onboard legacy --force
 
 First-run trigger behavior is exact:
 
-- Triggered during plugin registration only when both `packPreset` and legacy `automationPreset` are unset.
+- Triggered during plugin registration only when both `packPreset` and legacy `automationPreset` are unset **and** no explicit non-preset automation config is present (for example `automationMode`, `packToggles`, `memoryBehaviorDomains`, or legacy automation booleans).
 - Plugin emits a setup log message and runtime event (`clawvault:onboarding_required`) that points to `clawvault openclaw onboard`.
 - Emission is one-time per plugin runtime process to avoid repeated prompt spam.
 
