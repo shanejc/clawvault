@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import clawvaultPlugin from "./openclaw-plugin.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
 
@@ -16,6 +16,10 @@ memory_write_vault, memory_write_boot, memory_capture_source, memory_update, mem
 */
 
 describe("openclaw plugin registration", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).__clawvaultOnboardingPromptedInProcess = false;
+  });
+
   const expectedToolNames = [
     "memory_search",
     "memory_get",
@@ -48,6 +52,7 @@ describe("openclaw plugin registration", () => {
         ...pluginConfig
       },
       registerTool,
+      emitRuntimeEvent: vi.fn(),
       on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
         hookNames.push(hookName);
         hookHandlers.set(hookName, handler);
@@ -61,9 +66,117 @@ describe("openclaw plugin registration", () => {
       hookNames,
       hookHandlers,
       registerTool,
-      logger
+      logger,
+      emitRuntimeEvent: api.emitRuntimeEvent
     };
   }
+
+  it("emits first-run onboarding prompt/event when pack preset is unset", async () => {
+    const { logger, emitRuntimeEvent } = registerWithConfig({});
+    await Promise.resolve();
+
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Run `clawvault openclaw onboard`"));
+    expect(emitRuntimeEvent).toHaveBeenCalledWith("clawvault:onboarding_required", {
+      reason: "missing_pack_preset",
+      configPaths: ["packPreset", "automationPreset"],
+      command: "clawvault openclaw onboard"
+    });
+  });
+
+  it("skips onboarding prompt/event when non-preset automation config is already explicit", async () => {
+    const { logger, emitRuntimeEvent } = registerWithConfig({
+      automationMode: true
+    });
+    await Promise.resolve();
+
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("clawvault openclaw onboard"));
+    expect(emitRuntimeEvent).not.toHaveBeenCalledWith("clawvault:onboarding_required", expect.anything());
+  });
+
+  it("suppresses onboarding prompts across re-registration with new API objects in the same process", async () => {
+    const createApi = () => ({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn()
+    });
+    const firstApi = createApi();
+    const secondApi = createApi();
+
+    clawvaultPlugin.register(firstApi);
+    await Promise.resolve();
+    clawvaultPlugin.register(secondApi);
+    await Promise.resolve();
+
+    expect(firstApi.logger.info).toHaveBeenCalledTimes(1);
+    expect(secondApi.logger.info).toHaveBeenCalledTimes(0);
+    expect(firstApi.emitRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(secondApi.emitRuntimeEvent).toHaveBeenCalledTimes(0);
+  });
+
+  it("suppresses repeated onboarding prompts when re-registering the same API object", async () => {
+    const api = {
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn()
+    };
+
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
+    clawvaultPlugin.register(api);
+    await Promise.resolve();
+
+    expect(api.logger.info).toHaveBeenCalledTimes(1);
+    expect(api.emitRuntimeEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a warning when onboarding runtime event emission fails", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger,
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {}),
+      emitRuntimeEvent: vi.fn(async () => {
+        throw new Error("emit-failed");
+      })
+    });
+
+    await new Promise<void>((resolve) => {
+      setImmediate(() => resolve());
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("failed to emit onboarding prompt/event: emit-failed"));
+  });
 
   it("registers substrate synchronously by default", () => {
     const { result } = registerWithConfig();

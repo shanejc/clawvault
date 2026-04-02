@@ -51,6 +51,59 @@ const AUTOMATION_PACKS: readonly ClawVaultAutomationPack[] = [
   "reflection-maintenance",
   "legacy-communication-policy"
 ] as const;
+const RUNTIME_STATE_BY_API = new WeakMap<OpenClawPluginApi, ClawVaultPluginRuntimeState>();
+const ONBOARDING_PROMPTED_PROCESS_KEY = "__clawvaultOnboardingPromptedInProcess";
+const LEGACY_AUTOMATION_CONFIG_KEYS: ReadonlyArray<keyof ClawVaultPluginConfig> = [
+  "enableStartupRecovery",
+  "enableSessionContextInjection",
+  "enableAutoCheckpoint",
+  "enableObserveOnNew",
+  "enableHeartbeatObservation",
+  "enableCompactionObservation",
+  "enableWeeklyReflection",
+  "enableFactExtraction",
+  "autoCheckpoint",
+  "observeOnHeartbeat",
+  "weeklyReflection",
+  "enableBeforePromptRecall",
+  "enableStrictBeforePromptRecall",
+  "enforceCommunicationProtocol",
+  "enableMessageSendingFilter"
+];
+
+function isOnboardingPromptedInProcess(): boolean {
+  return (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] === true;
+}
+
+function markOnboardingPromptedInProcess(): void {
+  (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] = true;
+}
+
+function hasExplicitAutomationConfig(pluginConfig: ClawVaultPluginConfig): boolean {
+  if (typeof pluginConfig.automationMode === "boolean") {
+    return true;
+  }
+
+  const explicitPackToggleEntries = pluginConfig.packToggles
+    ? Object.values(pluginConfig.packToggles).filter((value) => typeof value === "boolean")
+    : [];
+  if (explicitPackToggleEntries.length > 0) {
+    return true;
+  }
+
+  const explicitDomainModeEntries = pluginConfig.memoryBehaviorDomains
+    ? Object.values(pluginConfig.memoryBehaviorDomains).filter((value) => value === "off" || value === "auto" || value === "callback")
+    : [];
+  if (explicitDomainModeEntries.length > 0) {
+    return true;
+  }
+
+  if (LEGACY_AUTOMATION_CONFIG_KEYS.some((key) => typeof pluginConfig[key] === "boolean")) {
+    return true;
+  }
+
+  return false;
+}
 
 function getEffectiveHookConfig(
   pluginConfig: ClawVaultPluginConfig,
@@ -447,6 +500,37 @@ function mergeBeforePromptBuildResults(results: Array<PluginHookBeforePromptBuil
 
 function isAutomationModeEnabled(pluginConfig: ClawVaultPluginConfig): boolean {
   return AUTOMATION_PACKS.some((pack) => isPackEnabled(pluginConfig, pack));
+}
+
+async function maybeEmitOnboardingRequiredPrompt(
+  api: OpenClawPluginApi,
+  pluginConfig: ClawVaultPluginConfig,
+  runtimeState: ClawVaultPluginRuntimeState
+): Promise<void> {
+  if (pluginConfig.packPreset || pluginConfig.automationPreset) {
+    return;
+  }
+  if (hasExplicitAutomationConfig(pluginConfig)) {
+    return;
+  }
+  if (isOnboardingPromptedInProcess()) {
+    runtimeState.markOnboardingPrompted();
+    return;
+  }
+  if (!runtimeState.shouldPromptOnboarding()) {
+    return;
+  }
+
+  runtimeState.markOnboardingPrompted();
+  markOnboardingPromptedInProcess();
+  api.logger.info(
+    "[clawvault] OpenClaw preset is unset (packPreset/automationPreset). Run `clawvault openclaw onboard` to complete first-run setup."
+  );
+  await api.emitRuntimeEvent?.("clawvault:onboarding_required", {
+    reason: "missing_pack_preset",
+    configPaths: ["packPreset", "automationPreset"],
+    command: "clawvault openclaw onboard"
+  });
 }
 
 function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDependencies): void {
@@ -884,7 +968,8 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
   plugins: { slots: { memory: ClawVaultMemoryManager } };
 } {
   const pluginConfig = readPluginConfig(api);
-  const runtimeState = new ClawVaultPluginRuntimeState();
+  const runtimeState = RUNTIME_STATE_BY_API.get(api) ?? new ClawVaultPluginRuntimeState();
+  RUNTIME_STATE_BY_API.set(api, runtimeState);
   const memoryManager = new ClawVaultMemoryManager({
     pluginConfig,
     defaultAgentId: "main",
@@ -913,6 +998,10 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
   api.registerTool(createMemoryCaptureSourceToolFactory(memoryWriteToolOptions), { name: "memory_capture_source" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_update"), { name: "memory_update" });
   api.registerTool(createMemoryUpdateToolFactory(memoryWriteToolOptions, "memory_patch"), { name: "memory_patch" });
+  void maybeEmitOnboardingRequiredPrompt(api, pluginConfig, runtimeState).catch((error) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    api.logger.warn(`[clawvault] failed to emit onboarding prompt/event: ${detail}`);
+  });
 
   if (isAutomationModeEnabled(pluginConfig)) {
     registerAutomationHooks(api, {
