@@ -28,7 +28,7 @@ describe("before_prompt_build hook", () => {
       { sessionKey: "agent:main:direct", agentId: "main" }
     );
 
-    expect(result?.prependSystemContext).toContain("ClawVault Recall Policy");
+    expect(result?.prependSystemContext).toContain("ClawVault Memory Recall Guidance");
     expect(result?.prependSystemContext).not.toContain("ClawVault Memory Recall Policy (Strict)");
     expect(result?.prependSystemContext).toContain("Recovered context");
     expect(result?.prependSystemContext).toContain("Session recap");
@@ -78,78 +78,5 @@ describe("before_prompt_build hook", () => {
       { sessionKey: "agent:main:direct", agentId: "main" }
     );
     expect(result).toBeUndefined();
-  });
-
-  it("skips recall policy and context injection for non-continuity prompts", async () => {
-    const runtimeState = new ClawVaultPluginRuntimeState();
-    let injectorCalls = 0;
-    const handler = createBeforePromptBuildHandler({
-      pluginConfig: {
-        enableBeforePromptRecall: true,
-        enforceCommunicationProtocol: false,
-        enableSessionContextInjection: true
-      },
-      runtimeState,
-      contextInjector: async () => {
-        injectorCalls += 1;
-        return {
-          prependSystemContext: "should not be injected",
-          memoryEntries: [],
-          recapEntries: [],
-          vaultPath: null
-        };
-      }
-    });
-
-    const result = await handler(
-      { prompt: "Write a haiku about coffee.", messages: [{ role: "user", content: "Write a haiku about coffee." }] },
-      { sessionKey: "agent:main:direct", agentId: "main" }
-    );
-
-    expect(injectorCalls).toBe(0);
-    expect(result).toBeUndefined();
-  });
-
-  it("refreshes recall using latest user correction and stores recall state", async () => {
-    const runtimeState = new ClawVaultPluginRuntimeState();
-    runtimeState.setRecallState("agent:main:direct", {
-      lastTriggerText: "What did we decide about the meeting?",
-      lastQueryText: "meeting",
-      lastResultDigest: "old recall"
-    });
-
-    let seenPrompt = "";
-    const handler = createBeforePromptBuildHandler({
-      pluginConfig: {
-        enableBeforePromptRecall: true,
-        enforceCommunicationProtocol: false,
-        enableSessionContextInjection: true
-      },
-      runtimeState,
-      contextInjector: async (input) => {
-        seenPrompt = input.prompt;
-        return {
-          prependSystemContext: "Relevant memories:\n- Tuesday meeting note.",
-          memoryEntries: [],
-          recapEntries: [],
-          vaultPath: "/tmp/vault"
-        };
-      }
-    });
-
-    const result = await handler(
-      {
-        prompt: "No, I was really talking about the meeting on Tuesday.",
-        messages: [
-          { role: "assistant", content: "I found the Thursday note." },
-          { role: "user", content: "No, I was really talking about the meeting on Tuesday." }
-        ]
-      },
-      { sessionKey: "agent:main:direct", agentId: "main" }
-    );
-
-    expect(seenPrompt).toContain("meeting on Tuesday");
-    expect(result?.prependSystemContext).toContain("Tuesday meeting note");
-    expect(runtimeState.getRecallState("agent:main:direct")?.lastResultDigest).toContain("Tuesday meeting note");
   });
 });

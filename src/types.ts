@@ -195,20 +195,13 @@ export const DEFAULT_CATEGORIES: Category[] = [
   'transcripts',
   'inbox',
   'templates',
-  'facts',
-  'feelings',
   'lessons',
   'agents',
   'commitments',
   'handoffs',
   'research',
   'tasks',
-  'backlog',
-  'meetings',
-  'systems',
-  'sources',
-  'imports',
-  'reports'
+  'backlog'
 ];
 
 /**
