@@ -910,6 +910,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
       if (captureAutoPacks.length > 0) {
         await handleBeforeCompactionObservation(event, ctx, {
           pluginConfig: observationConfig,
+          runtimeState,
           logger: api.logger
         });
       }
@@ -922,6 +923,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         if (decision === "fallback_auto") {
           await handleBeforeCompactionObservation(event, ctx, {
             pluginConfig: observationConfig,
+            runtimeState,
             logger: api.logger
           });
         } else if (decision === "error") {
@@ -934,6 +936,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
       if (captureAutoPacks.length > 0) {
         await handleAgentEndHeartbeat(event, ctx, {
           pluginConfig: observationConfig,
+          runtimeState,
           logger: api.logger
         });
       }
@@ -946,6 +949,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
         if (decision === "fallback_auto") {
           await handleAgentEndHeartbeat(event, ctx, {
             pluginConfig: observationConfig,
+            runtimeState,
             logger: api.logger
           });
         } else if (decision === "error") {

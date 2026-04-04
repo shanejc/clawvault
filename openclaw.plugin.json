@@ -156,6 +156,19 @@
         "description": "Enable before_prompt_build memory recall directives and vault context injection.",
         "default": true
       },
+      "recallPolicyPath": {
+        "type": "string",
+        "description": "Optional path to a recall meta-prompt file. Used only during before_prompt_build recall handling."
+      },
+      "enableAgentWriteback": {
+        "type": "boolean",
+        "description": "Enable conservative writeback classification on agent_end.",
+        "default": true
+      },
+      "writebackPolicyPath": {
+        "type": "string",
+        "description": "Optional path to a writeback meta-prompt file. Used only during writeback handling."
+      },
       "enableMessageSendingFilter": {
         "type": "boolean",
         "description": "Enable outbound message filtering via message_sending hook.",
@@ -249,6 +262,18 @@
     "enableBeforePromptRecall": {
       "label": "Enable Before Prompt Recall",
       "description": "Use before_prompt_build to force memory recall and inject vault context."
+    },
+    "recallPolicyPath": {
+      "label": "Recall Policy Path",
+      "description": "Optional path to the recall meta-prompt file used only during recall handling."
+    },
+    "enableAgentWriteback": {
+      "label": "Enable Agent Writeback",
+      "description": "Use agent_end to classify and write back conservative memory notes."
+    },
+    "writebackPolicyPath": {
+      "label": "Writeback Policy Path",
+      "description": "Optional path to the writeback meta-prompt file used only during writeback handling."
     },
     "enableMessageSendingFilter": {
       "label": "Enable Message Sending Filter",
