@@ -156,6 +156,10 @@
         "description": "Enable before_prompt_build memory recall directives and vault context injection.",
         "default": true
       },
+      "recallPolicyPath": {
+        "type": "string",
+        "description": "Optional path to a recall meta-prompt file. Used only during before_prompt_build recall handling. Resolved relative to workspaceDir if not absolute."
+      },
       "enableMessageSendingFilter": {
         "type": "boolean",
         "description": "Enable outbound message filtering via message_sending hook.",
