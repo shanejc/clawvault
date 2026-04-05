@@ -184,20 +184,56 @@ function writeSource(vaultPath: string, body: string): void {
   }
 }
 
+const BOOT_SECTION_SIGNALS: Array<{ pattern: RegExp; section: string }> = [
+  { pattern: /\b(lucy|i am|my role|my voice|assistant|who i am)\b/i, section: "Who I Am" },
+  { pattern: /\b(shane|his role|he is|timezone|family|email account|who shane is)\b/i, section: "Who Shane Is" },
+  { pattern: /\b(email|gmail|yahoo|inbox|mail account)\b/i, section: "Shane's Email Accounts" },
+  { pattern: /\b(voice|elevenlabs|jessica|tts|say\b)\b/i, section: "My Voice" },
+  { pattern: /\b(onedrive|drive id|graph api|onedrive)\b/i, section: "OneDrive" },
+  { pattern: /\b(lamp|device|home assistant|switch|hass)\b/i, section: "Home Devices" },
+  { pattern: /\b(ollama|local model|pip\b|jetson|qwen|mistral)\b/i, section: "Local Model Delegation" },
+];
+
+function detectBootSection(text: string): string {
+  for (const { pattern, section } of BOOT_SECTION_SIGNALS) {
+    if (pattern.test(text)) return section;
+  }
+  return "Boot Notes";
+}
+
 function writeBoot(workspaceDir: string, note: string): void {
   const memoryPath = path.join(workspaceDir, "MEMORY.md");
   if (!fs.existsSync(memoryPath)) return;
-  const existing = fs.readFileSync(memoryPath, "utf-8");
+  const raw = fs.readFileSync(memoryPath, "utf-8");
   const entry = `- ${note.trim().replace(/^-+\s*/, "")}`;
-  // Append under a "Boot Notes" section if it exists, else append at end
-  if (existing.includes("## Boot Notes")) {
-    const updated = existing.replace(/(## Boot Notes\n)([\s\S]*?)(\n## |$)/, (_, h, body, next) => {
-      return `${h}${body.trim()}\n${entry}\n${next}`;
-    });
-    fs.writeFileSync(memoryPath, updated, "utf-8");
-  } else {
-    fs.appendFileSync(memoryPath, `\n## Boot Notes\n${entry}\n`, "utf-8");
+
+  // Skip if this bullet already exists anywhere in the file
+  if (raw.includes(entry)) return;
+
+  const targetSection = detectBootSection(note);
+  const lines = raw.split(/\r?\n/);
+  let sectionStart = -1;
+  let sectionEnd = lines.length;
+
+  // Find the target section
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === `## ${targetSection}`) {
+      sectionStart = i;
+    } else if (sectionStart !== -1 && i > sectionStart && /^## /.test(lines[i])) {
+      sectionEnd = i;
+      break;
+    }
   }
+
+  if (sectionStart !== -1) {
+    // Insert before the next section (or end of section block)
+    lines.splice(sectionEnd, 0, entry);
+  } else {
+    // Section doesn't exist — append it at the end
+    lines.push("", `## ${targetSection}`, entry);
+  }
+
+  fs.writeFileSync(memoryPath, lines.join("\n"), "utf-8");
 }
 
 // ─── Writeback handler factory ────────────────────────────────────────────────
