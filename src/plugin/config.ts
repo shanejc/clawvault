@@ -60,6 +60,8 @@ export interface ClawVaultPluginConfig {
   enableBeforePromptRecall?: boolean;
   enableStrictBeforePromptRecall?: boolean;
   recallPolicyPath?: string;
+  enableAgentWriteback?: boolean;
+  writebackPolicyPath?: string;
   enforceCommunicationProtocol?: boolean;
   enableMessageSendingFilter?: boolean;
   minQuestionRecallScore?: number;

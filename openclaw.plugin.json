@@ -160,6 +160,15 @@
         "type": "string",
         "description": "Optional path to a recall meta-prompt file. Used only during before_prompt_build recall handling. Resolved relative to workspaceDir if not absolute."
       },
+      "enableAgentWriteback": {
+        "type": "boolean",
+        "description": "Enable conservative writeback classification on agent_end. Writes memory-worthy turns to the correct vault layer. Defaults to true.",
+        "default": true
+      },
+      "writebackPolicyPath": {
+        "type": "string",
+        "description": "Optional path to a writeback meta-prompt file. Resolved relative to workspaceDir if not absolute. Falls back to clawvault/WRITEBACK.md in the workspace."
+      },
       "enableMessageSendingFilter": {
         "type": "boolean",
         "description": "Enable outbound message filtering via message_sending hook.",

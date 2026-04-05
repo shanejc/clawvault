@@ -24,7 +24,8 @@ import {
 } from "./plugin/hooks/session-lifecycle.js";
 import {
   handleAgentEndHeartbeat,
-  handleBeforeCompactionObservation
+  handleBeforeCompactionObservation,
+  createAgentEndWritebackHandler
 } from "./plugin/hooks/observation.js";
 import type {
   ClawVaultCallbackDecision,
@@ -1010,6 +1011,13 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
       memoryManager
     });
   }
+
+  // Writeback handler: always registered independently of automation packs.
+  // State is scoped to the closure, not runtime-state.
+  const agentEndWritebackHandler = createAgentEndWritebackHandler(pluginConfig);
+  api.on("agent_end", async (event, ctx) => {
+    await agentEndWritebackHandler(event, ctx, { pluginConfig, logger: api.logger });
+  });
 
   return {
     plugins: {
