@@ -90,7 +90,13 @@ function installSpawnDefaults(prefixPath: string): void {
       return { status: 0, stdout: `${prefixPath}\n`, stderr: '' };
     }
     if (command === 'openclaw') {
-      return { status: 0, stdout: 'clawvault enabled\n', stderr: '' };
+      if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.entries.clawvault.package') {
+        return { status: 0, stdout: 'clawvault\n', stderr: '' };
+      }
+      if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.slots.memory') {
+        return { status: 0, stdout: 'clawvault\n', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
     }
     if (command === 'git') {
       return { status: 0, stdout: 'git version 2.44.0\n', stderr: '' };
@@ -156,13 +162,19 @@ describe('doctor', () => {
     }
   });
 
-  it('warns when OpenClaw does not list clawvault plugin', async () => {
+  it('warns when OpenClaw plugin package config is missing/mismatched', async () => {
     const vaultPath = makeTempDir('clawvault-doctor-openclaw-');
     writeConfig(vaultPath, { name: 'test-vault' });
     installSpawnDefaults(vaultPath);
     spawnSyncMock.mockImplementation((command: string, args: string[]) => {
       if (command === 'openclaw') {
-        return { status: 0, stdout: 'other-plugin enabled\n', stderr: '' };
+        if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.entries.clawvault.package') {
+          return { status: 0, stdout: 'other-plugin\n', stderr: '' };
+        }
+        if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.slots.memory') {
+          return { status: 0, stdout: 'clawvault\n', stderr: '' };
+        }
+        return { status: 0, stdout: '', stderr: '' };
       }
       if (command === 'npm' && args[0] === '--version') {
         return { status: 0, stdout: '10.9.4\n', stderr: '' };
@@ -179,6 +191,38 @@ describe('doctor', () => {
     try {
       const report = await doctor({ vaultPath });
       expect(checkByLabel(report, 'OpenClaw plugin registration')?.status).toBe('warn');
+      expect(checkByLabel(report, 'OpenClaw plugin registration')?.hint).toContain('plugins.entries.clawvault.package');
+    } finally {
+      fs.rmSync(vaultPath, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps OpenClaw remediation actionable when openclaw CLI is missing', async () => {
+    const vaultPath = makeTempDir('clawvault-doctor-openclaw-missing-cli-');
+    writeConfig(vaultPath, { name: 'test-vault' });
+    installSpawnDefaults(vaultPath);
+    spawnSyncMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'openclaw') {
+        return { status: null, stdout: '', stderr: '', error: { code: 'ENOENT', message: 'openclaw not found' } };
+      }
+      if (command === 'npm' && args[0] === '--version') {
+        return { status: 0, stdout: '10.9.4\n', stderr: '' };
+      }
+      if (command === 'npm' && args[0] === 'config' && args[1] === 'get' && args[2] === 'prefix') {
+        return { status: 0, stdout: `${vaultPath}\n`, stderr: '' };
+      }
+      if (command === 'git') {
+        return { status: 0, stdout: 'git version 2.44.0\n', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    try {
+      const report = await doctor({ vaultPath });
+      const openclawCheck = checkByLabel(report, 'OpenClaw plugin registration');
+      expect(openclawCheck?.status).toBe('warn');
+      expect(openclawCheck?.hint).toContain('plugins.entries.clawvault.package');
+      expect(openclawCheck?.hint).toContain('plugins.slots.memory');
     } finally {
       fs.rmSync(vaultPath, { recursive: true, force: true });
     }
