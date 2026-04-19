@@ -6,8 +6,8 @@ import type { ClawVaultPluginConfig } from "./plugin/config.js";
 Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
 | preset | hooks |
 | --- | --- |
-| thin | (none) |
-| hybrid | before_prompt_build, gateway_start, session_start, session_end, before_reset |
+| thin | agent_end |
+| hybrid | before_prompt_build, gateway_start, session_start, session_end, before_reset, agent_end |
 | legacy | before_prompt_build, message_sending, gateway_start, session_start, session_end, before_reset, before_compaction, agent_end |
 
 Tools are always registered for every preset:
@@ -198,11 +198,11 @@ describe("openclaw plugin registration", () => {
   it.each([
     {
       preset: "thin",
-      expectedHooks: []
+      expectedHooks: ["agent_end"]
     },
     {
       preset: "hybrid",
-      expectedHooks: ["before_prompt_build", "gateway_start", "session_start", "session_end", "before_reset"]
+      expectedHooks: ["before_prompt_build", "gateway_start", "session_start", "session_end", "before_reset", "agent_end"]
     },
     {
       preset: "legacy",
@@ -236,7 +236,7 @@ describe("openclaw plugin registration", () => {
       }
     });
 
-    expect(hookNames).toEqual(["before_prompt_build", "message_sending"]);
+    expect(hookNames).toEqual(["before_prompt_build", "message_sending", "agent_end"]);
   });
 
   it("dispatches callback handlers for callback mode without running built-in before_prompt_build automation", async () => {
@@ -489,7 +489,10 @@ describe("openclaw plugin registration", () => {
     });
 
     const beforePromptBuild = map.get("before_prompt_build");
-    const result = await beforePromptBuild?.({ prompt: "hello", messages: [] }, {});
+    const result = await beforePromptBuild?.({
+      prompt: "what did we decide last time?",
+      messages: [{ role: "user", content: "what did we decide last time?" }]
+    }, {});
     expect((result as { prependSystemContext?: string } | undefined)?.prependSystemContext).toContain("ClawVault Memory Recall Guidance");
   });
 
@@ -533,14 +536,17 @@ describe("openclaw plugin registration", () => {
       }
     });
 
-    expect(hookNames).toEqual([]);
+    expect(hookNames).toEqual(["agent_end"]);
     expect(callback).not.toHaveBeenCalled();
   });
 
   it.each([
     {
       hookName: "before_prompt_build",
-      event: { prompt: "hello", messages: [] },
+      event: {
+        prompt: "what did we decide last sprint?",
+        messages: [{ role: "user", content: "what did we decide last sprint?" }]
+      },
       ctx: {},
       behaviorConfig: {
         memoryBehaviorDomains: {

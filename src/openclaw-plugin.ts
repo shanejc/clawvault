@@ -34,6 +34,8 @@ import type {
   ClawVaultDistillationOrchestrationPayload,
   ClawVaultSuggestedActionMap,
   OpenClawPluginApi,
+  PluginHookAgentContext,
+  PluginHookAgentEndEvent,
   PluginHookBeforePromptBuildResult,
   PluginHookName
 } from "./plugin/openclaw-types.js";
@@ -44,6 +46,7 @@ interface AutomationHookDependencies {
   pluginConfig: ClawVaultPluginConfig;
   runtimeState: ClawVaultPluginRuntimeState;
   memoryManager: ClawVaultMemoryManager;
+  agentEndWritebackHandler?: (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => Promise<void>;
 }
 
 const AUTOMATION_PACKS: readonly ClawVaultAutomationPack[] = [
@@ -953,6 +956,7 @@ function registerAutomationHooks(api: OpenClawPluginApi, deps: AutomationHookDep
           api.logger.warn("[clawvault] agent_end callback returned error decision; continuing safely");
         }
       }
+      await deps.agentEndWritebackHandler?.(event, ctx);
     });
   }
 }
@@ -1004,20 +1008,26 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
     api.logger.warn(`[clawvault] failed to emit onboarding prompt/event: ${detail}`);
   });
 
+  const agentEndWritebackHandler = createAgentEndWritebackHandler(pluginConfig);
+  const captureObservationEnabled = isPackEnabled(pluginConfig, "capture-observation");
+
   if (isAutomationModeEnabled(pluginConfig)) {
     registerAutomationHooks(api, {
       pluginConfig,
       runtimeState,
-      memoryManager
+      memoryManager,
+      agentEndWritebackHandler: captureObservationEnabled
+        ? async (event, ctx) => agentEndWritebackHandler(event, ctx, { pluginConfig, logger: api.logger })
+        : undefined
     });
   }
 
-  // Writeback handler: always registered independently of automation packs.
-  // State is scoped to the closure, not runtime-state.
-  const agentEndWritebackHandler = createAgentEndWritebackHandler(pluginConfig);
-  api.on("agent_end", async (event, ctx) => {
-    await agentEndWritebackHandler(event, ctx, { pluginConfig, logger: api.logger });
-  });
+  if (!captureObservationEnabled) {
+    // Writeback handler remains available when capture-observation automation is off.
+    api.on("agent_end", async (event, ctx) => {
+      await agentEndWritebackHandler(event, ctx, { pluginConfig, logger: api.logger });
+    });
+  }
 
   return {
     plugins: {
