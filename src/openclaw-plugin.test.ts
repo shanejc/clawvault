@@ -8,7 +8,7 @@ Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
 | --- | --- |
 | thin | agent_end |
 | hybrid | before_prompt_build, gateway_start, session_start, session_end, before_reset, agent_end |
-| legacy | before_prompt_build, message_sending, gateway_start, session_start, session_end, before_reset, before_compaction, agent_end, agent_end |
+| legacy | before_prompt_build, message_sending, gateway_start, session_start, session_end, before_reset, before_compaction, agent_end |
 
 Tools are always registered for every preset:
 memory_search, memory_get, memory_categories, memory_classify,
@@ -214,7 +214,6 @@ describe("openclaw plugin registration", () => {
         "session_end",
         "before_reset",
         "before_compaction",
-        "agent_end",
         "agent_end"
       ]
     }
