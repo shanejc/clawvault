@@ -1040,11 +1040,30 @@ function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: Cl
     embedding
   };
 
-  api.registerMemoryCapability?.(capability);
-  api.registerMemoryRuntime?.(runtime);
-  api.registerMemoryPrompt?.(prompt);
-  api.registerMemoryFlush?.(flush);
-  api.registerMemoryEmbedding?.(embedding);
+  const maybeRegisterMemoryCapability = api.registerMemoryCapability;
+  if (typeof maybeRegisterMemoryCapability === "function") {
+    maybeRegisterMemoryCapability(capability);
+  }
+
+  const maybeRegisterMemoryRuntime = api.registerMemoryRuntime;
+  if (typeof maybeRegisterMemoryRuntime === "function") {
+    maybeRegisterMemoryRuntime(runtime);
+  }
+
+  const maybeRegisterMemoryPrompt = api.registerMemoryPrompt;
+  if (typeof maybeRegisterMemoryPrompt === "function") {
+    maybeRegisterMemoryPrompt(prompt);
+  }
+
+  const maybeRegisterMemoryFlush = api.registerMemoryFlush;
+  if (typeof maybeRegisterMemoryFlush === "function") {
+    maybeRegisterMemoryFlush(flush);
+  }
+
+  const maybeRegisterMemoryEmbedding = api.registerMemoryEmbedding;
+  if (typeof maybeRegisterMemoryEmbedding === "function") {
+    maybeRegisterMemoryEmbedding(embedding);
+  }
 }
 
 function registerOpenClawPlugin(api: OpenClawPluginApi): {

@@ -265,6 +265,37 @@ describe("openclaw plugin registration", () => {
     expect(runtime.status).not.toBe(memorySlot.status);
   });
 
+  it("ignores non-function memory registration placeholders and continues plugin registration", () => {
+    const registerTool = vi.fn();
+    const on = vi.fn((_: string, __: (...args: unknown[]) => unknown) => {});
+
+    expect(() => {
+      clawvaultPlugin.register({
+        id: "clawvault",
+        name: "ClawVault",
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn()
+        },
+        pluginConfig: {
+          vaultPath: "/tmp/does-not-exist"
+        },
+        registerTool,
+        on,
+        registerMemoryCapability: true as unknown as never,
+        registerMemoryRuntime: "runtime" as unknown as never,
+        registerMemoryPrompt: 123 as unknown as never,
+        registerMemoryFlush: { enabled: true } as unknown as never,
+        registerMemoryEmbedding: [] as unknown as never
+      });
+    }).not.toThrow();
+
+    expect(registerTool).toHaveBeenCalled();
+    expect(on).toHaveBeenCalled();
+  });
+
   it("keeps runtime entry compatibility for non-OpenClaw registry objects", () => {
     const runtimeRegistry: Record<string, unknown> = {};
     const result = clawvaultPlugin.register(runtimeRegistry) as { plugins: { slots: { memory: unknown } } };
