@@ -259,6 +259,11 @@ export type OpenClawPluginApi = {
   logger: PluginLogger;
   pluginConfig?: Record<string, unknown>;
   registerTool: (tool: unknown, opts?: { name?: string; names?: string[]; optional?: boolean }) => void;
+  registerMemoryCapability?: (capability: OpenClawMemoryCapabilityRegistration) => void;
+  registerMemoryRuntime?: (runtime: OpenClawMemoryRuntimeRegistration) => void;
+  registerMemoryPrompt?: (prompt: OpenClawMemoryPromptRegistration) => void;
+  registerMemoryFlush?: (flush: OpenClawMemoryFlushRegistration) => void;
+  registerMemoryEmbedding?: (embedding: OpenClawMemoryEmbeddingRegistration) => void;
   on: <K extends PluginHookName>(
     hookName: K,
     handler: PluginHookHandlerMap[K],
@@ -266,4 +271,54 @@ export type OpenClawPluginApi = {
   ) => void;
   emitRuntimeEvent?: ClawVaultCallbackEventEmitter;
   invokeClawVaultCallback?: ClawVaultCallbackInvoker;
+};
+
+export type OpenClawMemoryRuntimeRegistration = {
+  search: ClawVaultMemoryManagerLike["search"];
+  readFile: ClawVaultMemoryManagerLike["readFile"];
+  status: ClawVaultMemoryManagerLike["status"];
+  sync: ClawVaultMemoryManagerLike["sync"];
+  close: ClawVaultMemoryManagerLike["close"];
+};
+
+export type OpenClawMemoryPromptRegistration = {
+  buildPromptSection: (params: {
+    query: string;
+    sessionKey?: string;
+    maxResults?: number;
+    minScore?: number;
+  }) => Promise<{ text: string }>;
+};
+
+export type OpenClawMemoryFlushRegistration = {
+  buildFlushPlan: (params?: { reason?: string; force?: boolean }) => Promise<{ shouldFlush: boolean; note?: string }>;
+};
+
+export type OpenClawMemoryEmbeddingRegistration = {
+  probeAvailability: () => Promise<{ ok: boolean; error?: string }>;
+  isVectorAvailable: () => Promise<boolean>;
+};
+
+export type OpenClawMemoryCapabilityRegistration = {
+  runtime: OpenClawMemoryRuntimeRegistration;
+  prompt: OpenClawMemoryPromptRegistration;
+  flush: OpenClawMemoryFlushRegistration;
+  embedding: OpenClawMemoryEmbeddingRegistration;
+};
+
+type ClawVaultMemoryManagerLike = {
+  search: (
+    query: string,
+    opts?: { maxResults?: number; minScore?: number; sessionKey?: string }
+  ) => Promise<unknown[]>;
+  readFile: (params: { relPath: string; from?: number; lines?: number }) => Promise<unknown>;
+  status: () => unknown;
+  sync: (params?: {
+    reason?: string;
+    force?: boolean;
+    progress?: (update: { completed: number; total: number; label?: string }) => void;
+  }) => Promise<void>;
+  close: () => Promise<void>;
+  probeEmbeddingAvailability: () => Promise<{ ok: boolean; error?: string }>;
+  probeVectorAvailability: () => Promise<boolean>;
 };

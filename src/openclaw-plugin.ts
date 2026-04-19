@@ -33,6 +33,11 @@ import type {
   ClawVaultCallbackResultMap,
   ClawVaultDistillationOrchestrationPayload,
   ClawVaultSuggestedActionMap,
+  OpenClawMemoryCapabilityRegistration,
+  OpenClawMemoryEmbeddingRegistration,
+  OpenClawMemoryFlushRegistration,
+  OpenClawMemoryPromptRegistration,
+  OpenClawMemoryRuntimeRegistration,
   OpenClawPluginApi,
   PluginHookAgentContext,
   PluginHookAgentEndEvent,
@@ -969,6 +974,79 @@ function isOpenClawPluginApi(value: unknown): value is OpenClawPluginApi {
     && typeof record.logger === "object";
 }
 
+function createMemoryRuntimeRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryRuntimeRegistration {
+  return {
+    search: (query, opts) => memoryManager.search(query, opts),
+    readFile: (params) => memoryManager.readFile(params),
+    status: () => memoryManager.status(),
+    sync: (params) => memoryManager.sync(params),
+    close: () => memoryManager.close()
+  };
+}
+
+function createMemoryPromptRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryPromptRegistration {
+  return {
+    async buildPromptSection(params) {
+      const query = typeof params.query === "string" ? params.query.trim() : "";
+      if (!query) return { text: "" };
+      const results = await memoryManager.search(query, {
+        sessionKey: params.sessionKey,
+        maxResults: params.maxResults,
+        minScore: params.minScore
+      });
+      if (!results.length) return { text: "" };
+
+      const lines = results.slice(0, 5).map((result, index) => {
+        const summary = typeof result.snippet === "string" ? result.snippet : "";
+        const truncated = summary.length > 280 ? `${summary.slice(0, 277)}...` : summary;
+        return `${index + 1}. ${truncated}`;
+      });
+      return { text: `ClawVault memory matches:\n${lines.join("\n")}` };
+    }
+  };
+}
+
+function createMemoryFlushRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryFlushRegistration {
+  return {
+    async buildFlushPlan(params) {
+      await memoryManager.sync({
+        reason: params?.reason,
+        force: params?.force
+      });
+      return {
+        shouldFlush: true,
+        note: params?.reason ? `synced:${params.reason}` : "synced"
+      };
+    }
+  };
+}
+
+function createMemoryEmbeddingRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryEmbeddingRegistration {
+  return {
+    probeAvailability: () => memoryManager.probeEmbeddingAvailability(),
+    isVectorAvailable: () => memoryManager.probeVectorAvailability()
+  };
+}
+
+function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: ClawVaultMemoryManager): void {
+  const runtime = createMemoryRuntimeRegistration(memoryManager);
+  const prompt = createMemoryPromptRegistration(memoryManager);
+  const flush = createMemoryFlushRegistration(memoryManager);
+  const embedding = createMemoryEmbeddingRegistration(memoryManager);
+  const capability: OpenClawMemoryCapabilityRegistration = {
+    runtime,
+    prompt,
+    flush,
+    embedding
+  };
+
+  api.registerMemoryCapability?.(capability);
+  api.registerMemoryRuntime?.(runtime);
+  api.registerMemoryPrompt?.(prompt);
+  api.registerMemoryFlush?.(flush);
+  api.registerMemoryEmbedding?.(embedding);
+}
+
 function registerOpenClawPlugin(api: OpenClawPluginApi): {
   plugins: { slots: { memory: ClawVaultMemoryManager } };
 } {
@@ -983,6 +1061,7 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
       warn: api.logger.warn
     }
   });
+  registerMemoryContractSurface(api, memoryManager);
 
   api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
   api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
