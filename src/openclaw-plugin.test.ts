@@ -42,6 +42,11 @@ describe("openclaw plugin registration", () => {
       error: vi.fn(),
       debug: vi.fn()
     };
+    const registerMemoryCapability = vi.fn();
+    const registerMemoryRuntime = vi.fn();
+    const registerMemoryPrompt = vi.fn();
+    const registerMemoryFlush = vi.fn();
+    const registerMemoryEmbedding = vi.fn();
 
     const api = {
       id: "clawvault",
@@ -52,6 +57,11 @@ describe("openclaw plugin registration", () => {
         ...pluginConfig
       },
       registerTool,
+      registerMemoryCapability,
+      registerMemoryRuntime,
+      registerMemoryPrompt,
+      registerMemoryFlush,
+      registerMemoryEmbedding,
       emitRuntimeEvent: vi.fn(),
       on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
         hookNames.push(hookName);
@@ -66,6 +76,11 @@ describe("openclaw plugin registration", () => {
       hookNames,
       hookHandlers,
       registerTool,
+      registerMemoryCapability,
+      registerMemoryRuntime,
+      registerMemoryPrompt,
+      registerMemoryFlush,
+      registerMemoryEmbedding,
       logger,
       emitRuntimeEvent: api.emitRuntimeEvent
     };
@@ -178,8 +193,15 @@ describe("openclaw plugin registration", () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("failed to emit onboarding prompt/event: emit-failed"));
   });
 
-  it("registers substrate synchronously by default", () => {
-    const { result } = registerWithConfig();
+  it("registers substrate + memory contract surfaces synchronously", () => {
+    const {
+      result,
+      registerMemoryCapability,
+      registerMemoryRuntime,
+      registerMemoryPrompt,
+      registerMemoryFlush,
+      registerMemoryEmbedding
+    } = registerWithConfig();
 
     // Critical: OpenClaw discards Promises from register(). Must be sync.
     expect(result).toBeDefined();
@@ -189,10 +211,116 @@ describe("openclaw plugin registration", () => {
       search?: unknown;
       readFile?: unknown;
       status?: unknown;
+      sync?: unknown;
+      close?: unknown;
+      probeEmbeddingAvailability?: unknown;
+      probeVectorAvailability?: unknown;
     };
     expect(typeof memorySlot.search).toBe("function");
     expect(typeof memorySlot.readFile).toBe("function");
     expect(typeof memorySlot.status).toBe("function");
+
+    expect(registerMemoryCapability).toHaveBeenCalledTimes(1);
+    expect(registerMemoryRuntime).toHaveBeenCalledTimes(1);
+    expect(registerMemoryPrompt).toHaveBeenCalledTimes(1);
+    expect(registerMemoryFlush).toHaveBeenCalledTimes(1);
+    expect(registerMemoryEmbedding).toHaveBeenCalledTimes(1);
+    const capability = registerMemoryCapability.mock.calls[0]?.[0] as {
+      runtime?: { search?: unknown; readFile?: unknown; status?: unknown; sync?: unknown; close?: unknown };
+      prompt?: { buildPromptSection?: unknown };
+      flush?: { buildFlushPlan?: unknown };
+      embedding?: { probeAvailability?: unknown; isVectorAvailable?: unknown };
+    };
+    const runtime = registerMemoryRuntime.mock.calls[0]?.[0] as {
+      search?: unknown;
+      readFile?: unknown;
+      status?: unknown;
+      sync?: unknown;
+      close?: unknown;
+    };
+    const prompt = registerMemoryPrompt.mock.calls[0]?.[0] as { buildPromptSection?: unknown };
+    const flush = registerMemoryFlush.mock.calls[0]?.[0] as { buildFlushPlan?: unknown };
+    const embedding = registerMemoryEmbedding.mock.calls[0]?.[0] as {
+      probeAvailability?: unknown;
+      isVectorAvailable?: unknown;
+    };
+
+    expect(capability.runtime).toBe(runtime);
+    expect(capability.prompt).toBe(prompt);
+    expect(capability.flush).toBe(flush);
+    expect(capability.embedding).toBe(embedding);
+
+    expect(runtime.search).toBeTypeOf("function");
+    expect(runtime.readFile).toBeTypeOf("function");
+    expect(runtime.status).toBeTypeOf("function");
+    expect(runtime.sync).toBeTypeOf("function");
+    expect(runtime.close).toBeTypeOf("function");
+    expect(prompt.buildPromptSection).toBeTypeOf("function");
+    expect(flush.buildFlushPlan).toBeTypeOf("function");
+    expect(embedding.probeAvailability).toBeTypeOf("function");
+    expect(embedding.isVectorAvailable).toBeTypeOf("function");
+
+    expect(runtime.search).not.toBe(memorySlot.search);
+    expect(runtime.readFile).not.toBe(memorySlot.readFile);
+    expect(runtime.status).not.toBe(memorySlot.status);
+  });
+
+  it("ignores non-function memory registration placeholders and continues plugin registration", () => {
+    const registerTool = vi.fn();
+    const on = vi.fn((_: string, __: (...args: unknown[]) => unknown) => {});
+
+    expect(() => {
+      clawvaultPlugin.register({
+        id: "clawvault",
+        name: "ClawVault",
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn()
+        },
+        pluginConfig: {
+          vaultPath: "/tmp/does-not-exist"
+        },
+        registerTool,
+        on,
+        registerMemoryCapability: true as unknown as never,
+        registerMemoryRuntime: "runtime" as unknown as never,
+        registerMemoryPrompt: 123 as unknown as never,
+        registerMemoryFlush: { enabled: true } as unknown as never,
+        registerMemoryEmbedding: [] as unknown as never
+      });
+    }).not.toThrow();
+
+    expect(registerTool).toHaveBeenCalled();
+    expect(on).toHaveBeenCalled();
+  });
+
+  it("keeps runtime entry compatibility for non-OpenClaw registry objects", () => {
+    const runtimeRegistry: Record<string, unknown> = {};
+    const result = clawvaultPlugin.register(runtimeRegistry) as { plugins: { slots: { memory: unknown } } };
+
+    const registryMemory = (runtimeRegistry.plugins as { slots: { memory: unknown } }).slots.memory as {
+      search?: unknown;
+      recall?: unknown;
+      capture?: unknown;
+      store?: unknown;
+    };
+    const resultMemory = result.plugins.slots.memory as {
+      search?: unknown;
+      recall?: unknown;
+      capture?: unknown;
+      store?: unknown;
+    };
+
+    expect(typeof registryMemory.search).toBe("function");
+    expect(typeof registryMemory.recall).toBe("function");
+    expect(typeof registryMemory.capture).toBe("function");
+    expect(typeof registryMemory.store).toBe("function");
+    expect(typeof resultMemory.search).toBe("function");
+    expect(typeof resultMemory.recall).toBe("function");
+    expect(typeof resultMemory.capture).toBe("function");
+    expect(typeof resultMemory.store).toBe("function");
   });
 
   it.each([
