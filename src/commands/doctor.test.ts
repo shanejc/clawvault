@@ -228,6 +228,43 @@ describe('doctor', () => {
     }
   });
 
+  it('treats non-zero openclaw config get as unset config and suggests config set remediation', async () => {
+    const vaultPath = makeTempDir('clawvault-doctor-openclaw-unset-config-');
+    writeConfig(vaultPath, { name: 'test-vault' });
+    installSpawnDefaults(vaultPath);
+    spawnSyncMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'openclaw') {
+        if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.entries.clawvault.package') {
+          return { status: 1, stdout: '', stderr: 'not found' };
+        }
+        if (args[0] === 'config' && args[1] === 'get' && args[2] === 'plugins.slots.memory') {
+          return { status: 0, stdout: 'clawvault\n', stderr: '' };
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (command === 'npm' && args[0] === '--version') {
+        return { status: 0, stdout: '10.9.4\n', stderr: '' };
+      }
+      if (command === 'npm' && args[0] === 'config' && args[1] === 'get' && args[2] === 'prefix') {
+        return { status: 0, stdout: `${vaultPath}\n`, stderr: '' };
+      }
+      if (command === 'git') {
+        return { status: 0, stdout: 'git version 2.44.0\n', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    try {
+      const report = await doctor({ vaultPath });
+      const openclawCheck = checkByLabel(report, 'OpenClaw plugin registration');
+      expect(openclawCheck?.status).toBe('warn');
+      expect(openclawCheck?.detail).toContain('plugins.entries.clawvault.package is unset');
+      expect(openclawCheck?.hint).toContain('openclaw config set plugins.entries.clawvault.package clawvault');
+    } finally {
+      fs.rmSync(vaultPath, { recursive: true, force: true });
+    }
+  });
+
   it('handles object-shaped vault path options without crashing', async () => {
     const vaultPath = makeTempDir('clawvault-doctor-object-path-');
     writeConfig(vaultPath, { name: 'test-vault' });

@@ -177,8 +177,11 @@ function readOpenClawConfig(pathKey: string): { value?: string; error?: string; 
   if (resultError) {
     return { error: resultError.message };
   }
+  if (result.signal) {
+    return { error: `openclaw config get terminated by signal ${result.signal}` };
+  }
   if (result.status !== 0) {
-    return { error: result.stderr?.trim() || `openclaw config get ${pathKey} failed.` };
+    return { value: undefined };
   }
   return { value: normalizeOpenClawConfigValue(result.stdout || '') };
 }
