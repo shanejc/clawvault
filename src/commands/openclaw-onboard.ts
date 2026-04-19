@@ -6,6 +6,7 @@ import {
   readOpenClawPackPreset,
   type FirstRunOpenClawPreset
 } from '../plugin/openclaw-config-helper.js';
+import { spawnSync } from 'child_process';
 
 export interface OpenClawOnboardOptions {
   mode?: string;
@@ -22,6 +23,7 @@ export interface OpenClawOnboardResult {
 
 interface OpenClawOnboardDeps {
   readPreset: () => FirstRunOpenClawPreset | null;
+  readConfig: (pathKey: string) => string | undefined;
   applyPreset: typeof applyOpenClawPackPreset;
   listPresetInfo: typeof listOpenClawPresetInfo;
   getPresetInfo: typeof getOpenClawPresetInfo;
@@ -32,12 +34,63 @@ interface OpenClawOnboardLogger {
   warn: (message: string) => void;
 }
 
+const OPENCLAW_PLUGIN_ENTRY_PACKAGE_PATH = 'plugins.entries.clawvault.package';
+const OPENCLAW_MEMORY_SLOT_PATH = 'plugins.slots.memory';
+
+function readOpenClawConfig(pathKey: string): string | undefined {
+  const result = spawnSync('openclaw', ['config', 'get', pathKey], {
+    encoding: 'utf8',
+    shell: process.platform === 'win32'
+  });
+
+  if (result.error) {
+    throw new Error(`Failed to run openclaw config get: ${result.error.message}`);
+  }
+
+  if (typeof result.status === 'number' && result.status !== 0) {
+    return undefined;
+  }
+
+  if (result.signal) {
+    throw new Error(`openclaw config get terminated by signal ${result.signal}`);
+  }
+
+  const trimmed = String(result.stdout ?? '').trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/^['"]|['"]$/g, '').trim() || undefined;
+}
+
 const DEFAULT_DEPS: OpenClawOnboardDeps = {
   readPreset: readOpenClawPackPreset,
+  readConfig: readOpenClawConfig,
   applyPreset: applyOpenClawPackPreset,
   listPresetInfo: listOpenClawPresetInfo,
   getPresetInfo: getOpenClawPresetInfo
 };
+
+function printLegacyMigrationDiagnostics(logger: OpenClawOnboardLogger, deps: OpenClawOnboardDeps): void {
+  const pluginEntryPackage = deps.readConfig(OPENCLAW_PLUGIN_ENTRY_PACKAGE_PATH);
+  const memorySlot = deps.readConfig(OPENCLAW_MEMORY_SLOT_PATH);
+
+  const migrationCommands: string[] = [];
+  if (pluginEntryPackage !== 'clawvault') {
+    migrationCommands.push(`openclaw config set ${OPENCLAW_PLUGIN_ENTRY_PACKAGE_PATH} clawvault`);
+  }
+  if (memorySlot !== 'clawvault') {
+    migrationCommands.push(`openclaw config set ${OPENCLAW_MEMORY_SLOT_PATH} clawvault`);
+  }
+
+  if (!migrationCommands.length) {
+    return;
+  }
+
+  logger.warn('Detected pre-change OpenClaw config. ClawVault plugin registration is incomplete.');
+  logger.info('Migration hints (run manually if needed):');
+  for (const command of migrationCommands) {
+    logger.info(`- ${command}`);
+  }
+  logger.info('Onboard remains non-destructive: it only changes packPreset unless you run migration commands yourself.');
+}
 
 function printPresetMenu(logger: OpenClawOnboardLogger, deps: OpenClawOnboardDeps): void {
   logger.info('Available OpenClaw ClawVault presets:');
@@ -70,6 +123,7 @@ export function runOpenClawOnboard(
   let currentMode: FirstRunOpenClawPreset | null;
   try {
     currentMode = deps.readPreset();
+    printLegacyMigrationDiagnostics(logger, deps);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('spawnSync openclaw ENOENT')) {

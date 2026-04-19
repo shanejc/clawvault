@@ -24,6 +24,7 @@ describe('runOpenClawOnboard', () => {
       logger,
       {
         readPreset: () => null,
+        readConfig: () => 'clawvault',
         applyPreset,
         listPresetInfo: () => [
           { mode: 'thin', description: 'manual', autonomousSideEffects: false },
@@ -56,6 +57,7 @@ describe('runOpenClawOnboard', () => {
       logger,
       {
         readPreset: () => null,
+        readConfig: () => 'clawvault',
         applyPreset,
         listPresetInfo: () => [
           { mode: 'thin', description: 'manual', autonomousSideEffects: false },
@@ -81,6 +83,7 @@ describe('runOpenClawOnboard', () => {
       logger,
       {
         readPreset: () => 'thin',
+        readConfig: () => 'clawvault',
         applyPreset,
         listPresetInfo: () => [
           { mode: 'thin', description: 'manual', autonomousSideEffects: false },
@@ -111,6 +114,7 @@ describe('runOpenClawOnboard', () => {
       logger,
       {
         readPreset: () => 'thin',
+        readConfig: () => 'clawvault',
         applyPreset,
         listPresetInfo: () => [
           { mode: 'thin', description: 'manual', autonomousSideEffects: false },
@@ -136,6 +140,7 @@ describe('runOpenClawOnboard', () => {
         readPreset: () => {
           throw new Error('Failed to run openclaw config get: spawnSync openclaw ENOENT');
         },
+        readConfig: () => 'clawvault',
         applyPreset: vi.fn(),
         listPresetInfo: () => [
           { mode: 'thin', description: 'manual', autonomousSideEffects: false },
@@ -145,5 +150,87 @@ describe('runOpenClawOnboard', () => {
         getPresetInfo: (mode) => ({ mode, description: `${mode} desc`, autonomousSideEffects: mode !== 'thin' })
       }
     )).toThrow('OpenClaw CLI not found. Install `openclaw` and re-run onboard.');
+  });
+
+  it('does not print migration diagnostics for modern plugin entry + slot config', () => {
+    const { logger, info, warn } = createLogger();
+
+    const result = runOpenClawOnboard(
+      {},
+      logger,
+      {
+        readPreset: () => 'thin',
+        readConfig: () => 'clawvault',
+        applyPreset: vi.fn(),
+        listPresetInfo: () => [
+          { mode: 'thin', description: 'manual', autonomousSideEffects: false },
+          { mode: 'hybrid', description: 'mixed', autonomousSideEffects: true },
+          { mode: 'legacy', description: 'legacy', autonomousSideEffects: true }
+        ],
+        getPresetInfo: (mode) => ({ mode, description: `${mode} desc`, autonomousSideEffects: mode !== 'thin' })
+      }
+    );
+
+    expect(result.changed).toBe(false);
+    expect(info.join('\n')).not.toContain('Migration hints');
+    expect(warn.join('\n')).not.toContain('incomplete');
+  });
+
+  it('prints migration commands when plugin entry/slot config is missing', () => {
+    const { logger, info, warn } = createLogger();
+    const readConfig = vi.fn((pathKey: string) => {
+      if (pathKey === 'plugins.entries.clawvault.package') return undefined;
+      if (pathKey === 'plugins.slots.memory') return undefined;
+      return 'clawvault';
+    });
+
+    runOpenClawOnboard(
+      {},
+      logger,
+      {
+        readPreset: () => 'thin',
+        readConfig,
+        applyPreset: vi.fn(),
+        listPresetInfo: () => [
+          { mode: 'thin', description: 'manual', autonomousSideEffects: false },
+          { mode: 'hybrid', description: 'mixed', autonomousSideEffects: true },
+          { mode: 'legacy', description: 'legacy', autonomousSideEffects: true }
+        ],
+        getPresetInfo: (mode) => ({ mode, description: `${mode} desc`, autonomousSideEffects: mode !== 'thin' })
+      }
+    );
+
+    expect(warn.join('\n')).toContain('config. ClawVault plugin registration is incomplete');
+    expect(info.join('\n')).toContain('openclaw config set plugins.entries.clawvault.package clawvault');
+    expect(info.join('\n')).toContain('openclaw config set plugins.slots.memory clawvault');
+  });
+
+  it('shows migration hints during dry-run output', () => {
+    const { logger, info } = createLogger();
+
+    const result = runOpenClawOnboard(
+      { mode: 'hybrid', dryRun: true },
+      logger,
+      {
+        readPreset: () => null,
+        readConfig: () => undefined,
+        applyPreset: vi.fn(),
+        listPresetInfo: () => [
+          { mode: 'thin', description: 'manual', autonomousSideEffects: false },
+          { mode: 'hybrid', description: 'mixed', autonomousSideEffects: true },
+          { mode: 'legacy', description: 'legacy', autonomousSideEffects: true }
+        ],
+        getPresetInfo: (mode) => ({ mode, description: `${mode} desc`, autonomousSideEffects: mode !== 'thin' })
+      }
+    );
+
+    expect(result).toEqual({
+      changed: false,
+      mode: 'hybrid',
+      previousMode: null,
+      command: 'openclaw config set plugins.entries.clawvault.config.packPreset hybrid'
+    });
+    expect(info.join('\n')).toContain('openclaw config set plugins.entries.clawvault.package clawvault');
+    expect(info.join('\n')).toContain('openclaw config set plugins.slots.memory clawvault');
   });
 });
