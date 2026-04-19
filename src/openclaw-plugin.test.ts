@@ -32,7 +32,10 @@ describe("openclaw plugin registration", () => {
     "memory_patch"
   ];
 
-  function registerWithConfig(pluginConfig: ClawVaultPluginConfig = {}) {
+  function registerWithConfig(
+    pluginConfig: ClawVaultPluginConfig = {},
+    options: { includeCapabilityApi?: boolean } = {}
+  ) {
     const hookNames: string[] = [];
     const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
     const registerTool = vi.fn();
@@ -57,7 +60,7 @@ describe("openclaw plugin registration", () => {
         ...pluginConfig
       },
       registerTool,
-      registerMemoryCapability,
+      ...(options.includeCapabilityApi === false ? {} : { registerMemoryCapability }),
       registerMemoryRuntime,
       registerMemoryPrompt,
       registerMemoryFlush,
@@ -207,18 +210,7 @@ describe("openclaw plugin registration", () => {
     expect(result).toBeDefined();
     expect(typeof (result as { then?: unknown }).then).not.toBe("function");
 
-    const memorySlot = (result as { plugins: { slots: { memory: unknown } } }).plugins.slots.memory as {
-      search?: unknown;
-      readFile?: unknown;
-      status?: unknown;
-      sync?: unknown;
-      close?: unknown;
-      probeEmbeddingAvailability?: unknown;
-      probeVectorAvailability?: unknown;
-    };
-    expect(typeof memorySlot.search).toBe("function");
-    expect(typeof memorySlot.readFile).toBe("function");
-    expect(typeof memorySlot.status).toBe("function");
+    expect(result).toEqual({});
 
     expect(registerMemoryCapability).toHaveBeenCalledTimes(1);
     expect(registerMemoryRuntime).toHaveBeenCalledTimes(1);
@@ -260,9 +252,20 @@ describe("openclaw plugin registration", () => {
     expect(embedding.probeAvailability).toBeTypeOf("function");
     expect(embedding.isVectorAvailable).toBeTypeOf("function");
 
-    expect(runtime.search).not.toBe(memorySlot.search);
-    expect(runtime.readFile).not.toBe(memorySlot.readFile);
-    expect(runtime.status).not.toBe(memorySlot.status);
+  });
+
+  it("keeps plugins.slots.memory return path as compatibility fallback when capability API is absent", () => {
+    const { result, registerMemoryCapability } = registerWithConfig({}, { includeCapabilityApi: false });
+    const memorySlot = (result as { plugins: { slots: { memory: unknown } } }).plugins.slots.memory as {
+      search?: unknown;
+      readFile?: unknown;
+      status?: unknown;
+    };
+
+    expect(registerMemoryCapability).not.toHaveBeenCalled();
+    expect(typeof memorySlot.search).toBe("function");
+    expect(typeof memorySlot.readFile).toBe("function");
+    expect(typeof memorySlot.status).toBe("function");
   });
 
   it("ignores non-function memory registration placeholders and continues plugin registration", () => {
