@@ -153,6 +153,10 @@ export function createMemorySlotPlugin(defaults: MemorySlotInitOptions = {}): {
   };
 }
 
+/**
+ * @deprecated Compatibility helper for legacy plugin registries.
+ * Prefer OpenClaw memory capability registration APIs instead.
+ */
 export function registerMemorySlot(registry: Record<string, any>, defaults: MemorySlotInitOptions = {}): void {
   if (!registry.plugins || typeof registry.plugins !== 'object') {
     registry.plugins = {};
@@ -162,4 +166,3 @@ export function registerMemorySlot(registry: Record<string, any>, defaults: Memo
   }
   registry.plugins.slots.memory = createMemorySlot(defaults);
 }
-

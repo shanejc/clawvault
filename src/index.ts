@@ -45,7 +45,7 @@ export {
   applyOpenClawPackPreset
 } from './plugin/openclaw-config-helper.js';
 export type { FirstRunOpenClawPreset, OpenClawPresetInfo, ApplyOpenClawPresetResult } from './plugin/openclaw-config-helper.js';
-export { createMemorySlot, registerMemorySlot } from './plugin/slot.js';
+export { createMemorySlot } from './plugin/slot.js';
 export type {
   MemorySlot,
   MemorySlotInitOptions,

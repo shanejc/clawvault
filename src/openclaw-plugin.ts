@@ -1028,7 +1028,7 @@ function createMemoryEmbeddingRegistration(memoryManager: ClawVaultMemoryManager
   };
 }
 
-function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: ClawVaultMemoryManager): void {
+function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: ClawVaultMemoryManager): boolean {
   const runtime = createMemoryRuntimeRegistration(memoryManager);
   const prompt = createMemoryPromptRegistration(memoryManager);
   const flush = createMemoryFlushRegistration(memoryManager);
@@ -1041,6 +1041,7 @@ function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: Cl
   };
 
   const maybeRegisterMemoryCapability = api.registerMemoryCapability;
+  const hasCapabilityApi = typeof maybeRegisterMemoryCapability === "function";
   if (typeof maybeRegisterMemoryCapability === "function") {
     maybeRegisterMemoryCapability(capability);
   }
@@ -1064,10 +1065,12 @@ function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: Cl
   if (typeof maybeRegisterMemoryEmbedding === "function") {
     maybeRegisterMemoryEmbedding(embedding);
   }
+
+  return hasCapabilityApi;
 }
 
 function registerOpenClawPlugin(api: OpenClawPluginApi): {
-  plugins: { slots: { memory: ClawVaultMemoryManager } };
+  plugins?: { slots: { memory: ClawVaultMemoryManager } };
 } {
   const pluginConfig = readPluginConfig(api);
   const runtimeState = RUNTIME_STATE_BY_API.get(api) ?? new ClawVaultPluginRuntimeState();
@@ -1080,7 +1083,7 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
       warn: api.logger.warn
     }
   });
-  registerMemoryContractSurface(api, memoryManager);
+  const hasCapabilityApi = registerMemoryContractSurface(api, memoryManager);
 
   api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
   api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
@@ -1125,6 +1128,10 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
     api.on("agent_end", async (event, ctx) => {
       await agentEndWritebackHandler(event, ctx, { pluginConfig, logger: api.logger });
     });
+  }
+
+  if (hasCapabilityApi) {
+    return {};
   }
 
   return {
