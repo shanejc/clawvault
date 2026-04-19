@@ -142,6 +142,50 @@ function selectConfigPath(vaultPath: string): string | undefined {
   return undefined;
 }
 
+function normalizeOpenClawConfigValue(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === 'undefined' || trimmed === 'null') return undefined;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === 'string') {
+      return parsed.trim() || undefined;
+    }
+    if (typeof parsed === 'number' || typeof parsed === 'boolean') {
+      return String(parsed);
+    }
+  } catch {
+    // Fall back to plain text handling below.
+  }
+
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith('\'') && trimmed.endsWith('\''))) {
+    return trimmed.slice(1, -1).trim() || undefined;
+  }
+  return trimmed;
+}
+
+function readOpenClawConfig(pathKey: string): { value?: string; error?: string; missingCli?: boolean } {
+  const result = spawnSync('openclaw', ['config', 'get', pathKey], {
+    encoding: 'utf-8',
+    shell: process.platform === 'win32'
+  });
+  const resultError = result.error as NodeJS.ErrnoException | undefined;
+  if (resultError?.code === 'ENOENT') {
+    return { missingCli: true };
+  }
+  if (resultError) {
+    return { error: resultError.message };
+  }
+  if (result.signal) {
+    return { error: `openclaw config get terminated by signal ${result.signal}` };
+  }
+  if (result.status !== 0) {
+    return { value: undefined };
+  }
+  return { value: normalizeOpenClawConfigValue(result.stdout || '') };
+}
+
 function parseConfigDocument(configPath: string): { data?: Record<string, unknown>; error?: string; format: 'json' | 'yaml' } {
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -634,42 +678,65 @@ export async function doctor(input?: string | DoctorOptions): Promise<DoctorRepo
     }
   }
 
-  const openClawResult = spawnSync('openclaw', ['hooks', 'list', '--verbose'], {
-    encoding: 'utf-8',
-    shell: process.platform === 'win32'
-  });
-  const openClawError = openClawResult.error as NodeJS.ErrnoException | undefined;
-  if (openClawError?.code === 'ENOENT') {
+  const pluginPackageConfig = readOpenClawConfig('plugins.entries.clawvault.package');
+  if (pluginPackageConfig.missingCli) {
     pushCheck({
       label: 'OpenClaw plugin registration',
       status: 'warn',
       detail: 'openclaw CLI not found; integration check skipped.',
-      hint: 'Install OpenClaw CLI, then run `openclaw hooks install clawvault && openclaw hooks enable clawvault`.',
+      hint: 'Install OpenClaw CLI, then set `plugins.entries.clawvault.package` and `plugins.slots.memory` in openclaw config.',
       category: 'integration'
     });
-  } else if (openClawError || openClawResult.status !== 0) {
+  } else if (pluginPackageConfig.error) {
     pushCheck({
       label: 'OpenClaw plugin registration',
       status: 'warn',
-      detail: openClawError?.message || openClawResult.stderr?.trim() || 'Unable to read OpenClaw hooks list.',
-      hint: 'Run `openclaw hooks list --verbose` to inspect hook/plugin state.',
+      detail: pluginPackageConfig.error,
+      hint: 'Run `openclaw config get plugins.entries.clawvault.package` to inspect plugin registration.',
       category: 'integration'
     });
-  } else if (/clawvault/i.test(`${openClawResult.stdout}\n${openClawResult.stderr}`)) {
+  } else if (!pluginPackageConfig.value || pluginPackageConfig.value !== 'clawvault') {
     pushCheck({
       label: 'OpenClaw plugin registration',
-      status: 'ok',
-      detail: 'clawvault appears in OpenClaw hook/plugin list.',
+      status: 'warn',
+      detail: 'plugins.entries.clawvault.package is unset or not "clawvault".',
+      hint: 'Run `openclaw config set plugins.entries.clawvault.package clawvault`.',
       category: 'integration'
     });
   } else {
-    pushCheck({
-      label: 'OpenClaw plugin registration',
-      status: 'warn',
-      detail: 'clawvault is not currently registered in OpenClaw hooks/plugins.',
-      hint: 'Run `openclaw hooks install clawvault && openclaw hooks enable clawvault`.',
-      category: 'integration'
-    });
+    const memorySlotConfig = readOpenClawConfig('plugins.slots.memory');
+    if (memorySlotConfig.missingCli) {
+      pushCheck({
+        label: 'OpenClaw plugin registration',
+        status: 'warn',
+        detail: 'openclaw CLI not found; integration check skipped.',
+        hint: 'Install OpenClaw CLI, then set `plugins.entries.clawvault.package` and `plugins.slots.memory` in openclaw config.',
+        category: 'integration'
+      });
+    } else if (memorySlotConfig.error) {
+      pushCheck({
+        label: 'OpenClaw plugin registration',
+        status: 'warn',
+        detail: memorySlotConfig.error,
+        hint: 'Run `openclaw config get plugins.slots.memory` to inspect memory slot mapping.',
+        category: 'integration'
+      });
+    } else if (memorySlotConfig.value !== 'clawvault') {
+      pushCheck({
+        label: 'OpenClaw plugin registration',
+        status: 'warn',
+        detail: 'plugins.slots.memory is not mapped to "clawvault".',
+        hint: 'Run `openclaw config set plugins.slots.memory clawvault`.',
+        category: 'integration'
+      });
+    } else {
+      pushCheck({
+        label: 'OpenClaw plugin registration',
+        status: 'ok',
+        detail: 'OpenClaw plugin config is set: plugins.entries.clawvault.package=clawvault and plugins.slots.memory=clawvault.',
+        category: 'integration'
+      });
+    }
   }
 
   if (!vaultReadyForDeepChecks || !vaultPathForChecks) {
