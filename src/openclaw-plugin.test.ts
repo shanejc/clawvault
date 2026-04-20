@@ -47,9 +47,9 @@ describe("openclaw plugin registration", () => {
     };
     const registerMemoryCapability = vi.fn();
     const registerMemoryRuntime = vi.fn();
-    const registerMemoryPrompt = vi.fn();
-    const registerMemoryFlush = vi.fn();
-    const registerMemoryEmbedding = vi.fn();
+    const registerMemoryPromptSection = vi.fn();
+    const registerMemoryFlushPlan = vi.fn();
+    const registerMemoryEmbeddingProvider = vi.fn();
 
     const api = {
       id: "clawvault",
@@ -62,9 +62,9 @@ describe("openclaw plugin registration", () => {
       registerTool,
       ...(options.includeCapabilityApi === false ? {} : { registerMemoryCapability }),
       registerMemoryRuntime,
-      registerMemoryPrompt,
-      registerMemoryFlush,
-      registerMemoryEmbedding,
+      registerMemoryPromptSection,
+      registerMemoryFlushPlan,
+      registerMemoryEmbeddingProvider,
       emitRuntimeEvent: vi.fn(),
       on: vi.fn((hookName: string, handler: (...args: unknown[]) => unknown) => {
         hookNames.push(hookName);
@@ -81,9 +81,9 @@ describe("openclaw plugin registration", () => {
       registerTool,
       registerMemoryCapability,
       registerMemoryRuntime,
-      registerMemoryPrompt,
-      registerMemoryFlush,
-      registerMemoryEmbedding,
+      registerMemoryPromptSection,
+      registerMemoryFlushPlan,
+      registerMemoryEmbeddingProvider,
       logger,
       emitRuntimeEvent: api.emitRuntimeEvent
     };
@@ -196,14 +196,14 @@ describe("openclaw plugin registration", () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("failed to emit onboarding prompt/event: emit-failed"));
   });
 
-  it("registers substrate + memory contract surfaces synchronously", () => {
+  it("registers substrate + memory contract surfaces synchronously", async () => {
     const {
       result,
       registerMemoryCapability,
       registerMemoryRuntime,
-      registerMemoryPrompt,
-      registerMemoryFlush,
-      registerMemoryEmbedding
+      registerMemoryPromptSection,
+      registerMemoryFlushPlan,
+      registerMemoryEmbeddingProvider
     } = registerWithConfig();
 
     // Critical: OpenClaw discards Promises from register(). Must be sync.
@@ -214,43 +214,48 @@ describe("openclaw plugin registration", () => {
 
     expect(registerMemoryCapability).toHaveBeenCalledTimes(1);
     expect(registerMemoryRuntime).toHaveBeenCalledTimes(1);
-    expect(registerMemoryPrompt).toHaveBeenCalledTimes(1);
-    expect(registerMemoryFlush).toHaveBeenCalledTimes(1);
-    expect(registerMemoryEmbedding).toHaveBeenCalledTimes(1);
+    expect(registerMemoryPromptSection).toHaveBeenCalledTimes(1);
+    expect(registerMemoryFlushPlan).toHaveBeenCalledTimes(1);
+    expect(registerMemoryEmbeddingProvider).toHaveBeenCalledTimes(1);
     const capability = registerMemoryCapability.mock.calls[0]?.[0] as {
-      runtime?: { search?: unknown; readFile?: unknown; status?: unknown; sync?: unknown; close?: unknown };
+      runtime?: {
+        getMemorySearchManager?: unknown;
+        resolveMemoryBackendConfig?: unknown;
+        closeAllMemorySearchManagers?: unknown;
+      };
       prompt?: { buildPromptSection?: unknown };
       flush?: { buildFlushPlan?: unknown };
       embedding?: { probeAvailability?: unknown; isVectorAvailable?: unknown };
     };
     const runtime = registerMemoryRuntime.mock.calls[0]?.[0] as {
-      search?: unknown;
-      readFile?: unknown;
-      status?: unknown;
-      sync?: unknown;
-      close?: unknown;
+      getMemorySearchManager?: unknown;
+      resolveMemoryBackendConfig?: unknown;
+      closeAllMemorySearchManagers?: unknown;
     };
-    const prompt = registerMemoryPrompt.mock.calls[0]?.[0] as { buildPromptSection?: unknown };
-    const flush = registerMemoryFlush.mock.calls[0]?.[0] as { buildFlushPlan?: unknown };
-    const embedding = registerMemoryEmbedding.mock.calls[0]?.[0] as {
-      probeAvailability?: unknown;
-      isVectorAvailable?: unknown;
-    };
+    const prompt = registerMemoryPromptSection.mock.calls[0]?.[0] as ((params: unknown) => string[]);
+    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params: unknown) => { shouldFlush: boolean; note?: string } | null);
+    const embedding = registerMemoryEmbeddingProvider.mock.calls[0]?.[0] as { id?: unknown; probeAvailability?: unknown; isVectorAvailable?: unknown };
 
     expect(capability.runtime).toBe(runtime);
-    expect(capability.prompt).toBe(prompt);
-    expect(capability.flush).toBe(flush);
-    expect(capability.embedding).toBe(embedding);
+    expect(typeof capability.prompt?.buildPromptSection).toBe("function");
+    expect(typeof capability.flush?.buildFlushPlan).toBe("function");
+    expect(typeof capability.embedding?.probeAvailability).toBe("function");
 
-    expect(runtime.search).toBeTypeOf("function");
-    expect(runtime.readFile).toBeTypeOf("function");
-    expect(runtime.status).toBeTypeOf("function");
-    expect(runtime.sync).toBeTypeOf("function");
-    expect(runtime.close).toBeTypeOf("function");
-    expect(prompt.buildPromptSection).toBeTypeOf("function");
-    expect(flush.buildFlushPlan).toBeTypeOf("function");
+    expect(runtime.getMemorySearchManager).toBeTypeOf("function");
+    expect(runtime.resolveMemoryBackendConfig).toBeTypeOf("function");
+    expect(runtime.closeAllMemorySearchManagers).toBeTypeOf("function");
+    expect(prompt).toBeTypeOf("function");
+    expect(flush).toBeTypeOf("function");
+    expect(embedding.id).toBe("clawvault");
     expect(embedding.probeAvailability).toBeTypeOf("function");
     expect(embedding.isVectorAvailable).toBeTypeOf("function");
+
+    const defaultManager = await runtime.getMemorySearchManager?.({});
+    const scopedManagerA = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
+    const scopedManagerB = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
+    expect(defaultManager).toBeDefined();
+    expect(typeof (defaultManager as { search?: unknown })?.search).toBe("function");
+    expect(scopedManagerA).toBe(scopedManagerB);
 
   });
 
@@ -289,9 +294,9 @@ describe("openclaw plugin registration", () => {
         on,
         registerMemoryCapability: true as unknown as never,
         registerMemoryRuntime: "runtime" as unknown as never,
-        registerMemoryPrompt: 123 as unknown as never,
-        registerMemoryFlush: { enabled: true } as unknown as never,
-        registerMemoryEmbedding: [] as unknown as never
+        registerMemoryPromptSection: 123 as unknown as never,
+        registerMemoryFlushPlan: { enabled: true } as unknown as never,
+        registerMemoryEmbeddingProvider: [] as unknown as never
       });
     }).not.toThrow();
 
