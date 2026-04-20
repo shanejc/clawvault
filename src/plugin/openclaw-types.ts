@@ -261,6 +261,13 @@ export type OpenClawPluginApi = {
   registerTool: (tool: unknown, opts?: { name?: string; names?: string[]; optional?: boolean }) => void;
   registerMemoryCapability?: (capability: OpenClawMemoryCapabilityRegistration) => void;
   registerMemoryRuntime?: (runtime: OpenClawMemoryRuntimeRegistration) => void;
+  registerMemoryPromptSection?: (builder: OpenClawMemoryPromptSectionRegistration) => void;
+  registerMemoryFlushPlan?: (resolver: OpenClawMemoryFlushPlanRegistration) => void;
+  registerMemoryEmbeddingProvider?: (
+    adapter: OpenClawMemoryEmbeddingProviderAdapterRegistration,
+    options?: OpenClawMemoryEmbeddingProviderOptions
+  ) => void;
+  // Backward compatibility aliases for older OpenClaw contract drafts.
   registerMemoryPrompt?: (prompt: OpenClawMemoryPromptRegistration) => void;
   registerMemoryFlush?: (flush: OpenClawMemoryFlushRegistration) => void;
   registerMemoryEmbedding?: (embedding: OpenClawMemoryEmbeddingRegistration) => void;
@@ -274,11 +281,42 @@ export type OpenClawPluginApi = {
 };
 
 export type OpenClawMemoryRuntimeRegistration = {
-  search: ClawVaultMemoryManagerLike["search"];
-  readFile: ClawVaultMemoryManagerLike["readFile"];
-  status: ClawVaultMemoryManagerLike["status"];
-  sync: ClawVaultMemoryManagerLike["sync"];
-  close: ClawVaultMemoryManagerLike["close"];
+  getMemorySearchManager: (params?: {
+    sessionKey?: string;
+    agentId?: string;
+    workspaceDir?: string;
+  }) => Promise<ClawVaultMemoryManagerLike>;
+  resolveMemoryBackendConfig: (params?: {
+    sessionKey?: string;
+    agentId?: string;
+    workspaceDir?: string;
+  }) => {
+    backend: string;
+    vaultPath: string | null;
+    provider?: string;
+    model?: string;
+  };
+  closeAllMemorySearchManagers?: () => Promise<void>;
+};
+
+export type OpenClawMemoryPromptSectionRegistration = (params: {
+  availableTools?: string[];
+  citationsMode?: string;
+}) => string[];
+
+export type OpenClawMemoryFlushPlanRegistration = (params?: Record<string, unknown>) => {
+  shouldFlush: boolean;
+  note?: string;
+} | null;
+
+export type OpenClawMemoryEmbeddingProviderAdapterRegistration = {
+  id: string;
+  probeAvailability: () => Promise<{ ok: boolean; error?: string }>;
+  isVectorAvailable: () => Promise<boolean>;
+};
+
+export type OpenClawMemoryEmbeddingProviderOptions = {
+  ownerPluginId?: string;
 };
 
 export type OpenClawMemoryPromptRegistration = {

@@ -1,5 +1,11 @@
 import { createMemorySlotPlugin, registerMemorySlot } from "./plugin/slot.js";
-import { getPackBehaviorMode, getPackCallbackPolicy, isPackEnabled, readPluginConfig } from "./plugin/config.js";
+import {
+  extractAgentIdFromSessionKey,
+  getPackBehaviorMode,
+  getPackCallbackPolicy,
+  isPackEnabled,
+  readPluginConfig
+} from "./plugin/config.js";
 import {
   ClawVaultMemoryManager,
   createMemoryCategoriesToolFactory,
@@ -13,6 +19,7 @@ import {
   createMemoryWriteBootToolFactory,
   createMemoryWriteVaultToolFactory
 } from "./plugin/memory-write-tools.js";
+import { resolveVaultPathForAgent } from "./plugin/clawvault-cli.js";
 import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 import { createBeforePromptBuildHandler } from "./plugin/hooks/before-prompt-build.js";
 import { createMessageSendingHandler } from "./plugin/hooks/message-sending.js";
@@ -34,9 +41,12 @@ import type {
   ClawVaultDistillationOrchestrationPayload,
   ClawVaultSuggestedActionMap,
   OpenClawMemoryCapabilityRegistration,
+  OpenClawMemoryEmbeddingProviderAdapterRegistration,
   OpenClawMemoryEmbeddingRegistration,
+  OpenClawMemoryFlushPlanRegistration,
   OpenClawMemoryFlushRegistration,
   OpenClawMemoryPromptRegistration,
+  OpenClawMemoryPromptSectionRegistration,
   OpenClawMemoryRuntimeRegistration,
   OpenClawPluginApi,
   PluginHookAgentContext,
@@ -974,70 +984,156 @@ function isOpenClawPluginApi(value: unknown): value is OpenClawPluginApi {
     && typeof record.logger === "object";
 }
 
-function createMemoryRuntimeRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryRuntimeRegistration {
-  return {
-    search: (query, opts) => memoryManager.search(query, opts),
-    readFile: (params) => memoryManager.readFile(params),
-    status: () => memoryManager.status(),
-    sync: (params) => memoryManager.sync(params),
-    close: () => memoryManager.close()
+function createMemoryRuntimeRegistration(
+  memoryManager: ClawVaultMemoryManager,
+  pluginConfig: ClawVaultPluginConfig
+): OpenClawMemoryRuntimeRegistration {
+  const memoryManagersByScope = new Map<string, ClawVaultMemoryManager>();
+  const managerKeyFor = (params?: { sessionKey?: string; agentId?: string; workspaceDir?: string }) => {
+    const sessionKey = typeof params?.sessionKey === "string" ? params.sessionKey : "";
+    const derivedAgentId = extractAgentIdFromSessionKey(sessionKey);
+    const agentId = params?.agentId ?? derivedAgentId ?? "main";
+    const workspaceDir = typeof params?.workspaceDir === "string" ? params.workspaceDir : "";
+    return `${agentId}::${workspaceDir}`;
   };
-}
 
-function createMemoryPromptRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryPromptRegistration {
-  return {
-    async buildPromptSection(params) {
-      const query = typeof params.query === "string" ? params.query.trim() : "";
-      if (!query) return { text: "" };
-      const results = await memoryManager.search(query, {
-        sessionKey: params.sessionKey,
-        maxResults: params.maxResults,
-        minScore: params.minScore
-      });
-      if (!results.length) return { text: "" };
+  const getOrCreateScopedManager = (params?: { sessionKey?: string; agentId?: string; workspaceDir?: string }) => {
+    const key = managerKeyFor(params);
+    const existing = memoryManagersByScope.get(key);
+    if (existing) return existing;
 
-      const lines = results.slice(0, 5).map((result, index) => {
-        const summary = typeof result.snippet === "string" ? result.snippet : "";
-        const truncated = summary.length > 280 ? `${summary.slice(0, 277)}...` : summary;
-        return `${index + 1}. ${truncated}`;
-      });
-      return { text: `ClawVault memory matches:\n${lines.join("\n")}` };
-    }
+    const sessionKey = typeof params?.sessionKey === "string" ? params.sessionKey : "";
+    const derivedAgentId = extractAgentIdFromSessionKey(sessionKey);
+    const agentId = params?.agentId ?? derivedAgentId ?? "main";
+    const scopedManager = new ClawVaultMemoryManager({
+      pluginConfig,
+      defaultAgentId: agentId,
+      workspaceDir: typeof params?.workspaceDir === "string" ? params.workspaceDir : undefined
+    });
+    memoryManagersByScope.set(key, scopedManager);
+    return scopedManager;
   };
-}
 
-function createMemoryFlushRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryFlushRegistration {
   return {
-    async buildFlushPlan(params) {
-      await memoryManager.sync({
-        reason: params?.reason,
-        force: params?.force
-      });
+    async getMemorySearchManager(params) {
+      return getOrCreateScopedManager(params);
+    },
+    resolveMemoryBackendConfig: (params) => {
+      const sessionKey = typeof params?.sessionKey === "string" ? params.sessionKey : "";
+      const agentId = params?.agentId
+        ?? extractAgentIdFromSessionKey(sessionKey)
+        ?? "main";
+      const providerStatus = memoryManager.status();
       return {
-        shouldFlush: true,
-        note: params?.reason ? `synced:${params.reason}` : "synced"
+        backend: providerStatus.backend,
+        vaultPath: resolveVaultPathForAgent(pluginConfig, {
+          agentId,
+          cwd: params?.workspaceDir
+        }),
+        provider: providerStatus.provider,
+        model: providerStatus.model
       };
+    },
+    closeAllMemorySearchManagers: async () => {
+      const scopedManagers = [...memoryManagersByScope.values()];
+      memoryManagersByScope.clear();
+      await Promise.all(scopedManagers.map(async (manager) => manager.close()));
+      await memoryManager.close();
     }
   };
 }
 
-function createMemoryEmbeddingRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryEmbeddingRegistration {
+function createMemoryPromptRegistration(): OpenClawMemoryPromptSectionRegistration {
+  return (params) => {
+    const lines: string[] = [];
+    if (Array.isArray(params.availableTools) && params.availableTools.length > 0) {
+      lines.push(`[ClawVault] Available memory tools: ${params.availableTools.join(", ")}`);
+    }
+    if (typeof params.citationsMode === "string" && params.citationsMode.trim().length > 0) {
+      lines.push(`[ClawVault] Citations mode: ${params.citationsMode.trim()}`);
+    }
+    return lines;
+  };
+}
+
+async function buildLegacyPromptSection(
+  memoryManager: ClawVaultMemoryManager,
+  params: {
+    query: string;
+    sessionKey?: string;
+    maxResults?: number;
+    minScore?: number;
+  }
+): Promise<{ text: string }> {
+  const query = typeof params.query === "string" ? params.query.trim() : "";
+  if (!query) return { text: "" };
+
+  const results = await memoryManager.search(query, {
+    sessionKey: params.sessionKey,
+    maxResults: params.maxResults,
+    minScore: params.minScore
+  });
+  if (!results.length) return { text: "" };
+
+  const lines = results.slice(0, 5).map((result, index) => {
+    const snippet = typeof result.snippet === "string" ? result.snippet : "";
+    const truncated = snippet.length > 280 ? `${snippet.slice(0, 277)}...` : snippet;
+    return `${index + 1}. ${truncated}`;
+  });
+  return { text: `ClawVault memory matches:\n${lines.join("\n")}` };
+}
+
+function createMemoryFlushRegistration(): OpenClawMemoryFlushPlanRegistration {
+  return (params) => {
+    const reason = typeof params?.reason === "string" ? params.reason : "memory_runtime";
+    const force = params?.force === true;
+    return {
+      shouldFlush: force || reason.length > 0,
+      note: `sync:${reason}`
+    };
+  };
+}
+
+function createMemoryEmbeddingRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryEmbeddingProviderAdapterRegistration {
   return {
+    id: "clawvault",
     probeAvailability: () => memoryManager.probeEmbeddingAvailability(),
     isVectorAvailable: () => memoryManager.probeVectorAvailability()
   };
 }
 
-function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: ClawVaultMemoryManager): boolean {
-  const runtime = createMemoryRuntimeRegistration(memoryManager);
-  const prompt = createMemoryPromptRegistration(memoryManager);
-  const flush = createMemoryFlushRegistration(memoryManager);
+function registerMemoryContractSurface(
+  api: OpenClawPluginApi,
+  memoryManager: ClawVaultMemoryManager,
+  pluginConfig: ClawVaultPluginConfig
+): boolean {
+  const runtime = createMemoryRuntimeRegistration(memoryManager, pluginConfig);
+  const prompt = createMemoryPromptRegistration();
+  const flush = createMemoryFlushRegistration();
   const embedding = createMemoryEmbeddingRegistration(memoryManager);
   const capability: OpenClawMemoryCapabilityRegistration = {
     runtime,
-    prompt,
-    flush,
-    embedding
+    prompt: {
+      async buildPromptSection(params) {
+        return buildLegacyPromptSection(memoryManager, params);
+      }
+    },
+    flush: {
+      async buildFlushPlan(params) {
+        const plan = flush(params as Record<string, unknown>);
+        if (plan?.shouldFlush) {
+          await memoryManager.sync({
+            reason: params?.reason,
+            force: params?.force
+          });
+        }
+        return plan ?? { shouldFlush: false };
+      }
+    },
+    embedding: {
+      probeAvailability: embedding.probeAvailability,
+      isVectorAvailable: embedding.isVectorAvailable
+    }
   };
 
   const maybeRegisterMemoryCapability = api.registerMemoryCapability;
@@ -1051,19 +1147,37 @@ function registerMemoryContractSurface(api: OpenClawPluginApi, memoryManager: Cl
     maybeRegisterMemoryRuntime(runtime);
   }
 
+  const maybeRegisterMemoryPromptSection = api.registerMemoryPromptSection;
+  if (typeof maybeRegisterMemoryPromptSection === "function") {
+    maybeRegisterMemoryPromptSection(prompt);
+  }
+
+  const maybeRegisterMemoryFlushPlan = api.registerMemoryFlushPlan;
+  if (typeof maybeRegisterMemoryFlushPlan === "function") {
+    maybeRegisterMemoryFlushPlan(flush);
+  }
+
+  const maybeRegisterMemoryEmbeddingProvider = api.registerMemoryEmbeddingProvider;
+  if (typeof maybeRegisterMemoryEmbeddingProvider === "function") {
+    maybeRegisterMemoryEmbeddingProvider(embedding, { ownerPluginId: api.id });
+  }
+
   const maybeRegisterMemoryPrompt = api.registerMemoryPrompt;
   if (typeof maybeRegisterMemoryPrompt === "function") {
-    maybeRegisterMemoryPrompt(prompt);
+    const legacyPrompt: OpenClawMemoryPromptRegistration = capability.prompt;
+    maybeRegisterMemoryPrompt(legacyPrompt);
   }
 
   const maybeRegisterMemoryFlush = api.registerMemoryFlush;
   if (typeof maybeRegisterMemoryFlush === "function") {
-    maybeRegisterMemoryFlush(flush);
+    const legacyFlush: OpenClawMemoryFlushRegistration = capability.flush;
+    maybeRegisterMemoryFlush(legacyFlush);
   }
 
   const maybeRegisterMemoryEmbedding = api.registerMemoryEmbedding;
   if (typeof maybeRegisterMemoryEmbedding === "function") {
-    maybeRegisterMemoryEmbedding(embedding);
+    const legacyEmbedding: OpenClawMemoryEmbeddingRegistration = capability.embedding;
+    maybeRegisterMemoryEmbedding(legacyEmbedding);
   }
 
   return hasCapabilityApi;
@@ -1083,7 +1197,7 @@ function registerOpenClawPlugin(api: OpenClawPluginApi): {
       warn: api.logger.warn
     }
   });
-  const hasCapabilityApi = registerMemoryContractSurface(api, memoryManager);
+  const hasCapabilityApi = registerMemoryContractSurface(api, memoryManager, pluginConfig);
 
   api.registerTool(createMemorySearchToolFactory(memoryManager), { name: "memory_search" });
   api.registerTool(createMemoryGetToolFactory(memoryManager), { name: "memory_get" });
