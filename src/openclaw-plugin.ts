@@ -1056,6 +1056,33 @@ function createMemoryPromptRegistration(): OpenClawMemoryPromptSectionRegistrati
   };
 }
 
+async function buildLegacyPromptSection(
+  memoryManager: ClawVaultMemoryManager,
+  params: {
+    query: string;
+    sessionKey?: string;
+    maxResults?: number;
+    minScore?: number;
+  }
+): Promise<{ text: string }> {
+  const query = typeof params.query === "string" ? params.query.trim() : "";
+  if (!query) return { text: "" };
+
+  const results = await memoryManager.search(query, {
+    sessionKey: params.sessionKey,
+    maxResults: params.maxResults,
+    minScore: params.minScore
+  });
+  if (!results.length) return { text: "" };
+
+  const lines = results.slice(0, 5).map((result, index) => {
+    const snippet = typeof result.snippet === "string" ? result.snippet : "";
+    const truncated = snippet.length > 280 ? `${snippet.slice(0, 277)}...` : snippet;
+    return `${index + 1}. ${truncated}`;
+  });
+  return { text: `ClawVault memory matches:\n${lines.join("\n")}` };
+}
+
 function createMemoryFlushRegistration(): OpenClawMemoryFlushPlanRegistration {
   return (params) => {
     const reason = typeof params?.reason === "string" ? params.reason : "memory_runtime";
@@ -1087,9 +1114,8 @@ function registerMemoryContractSurface(
   const capability: OpenClawMemoryCapabilityRegistration = {
     runtime,
     prompt: {
-      async buildPromptSection() {
-        const lines = prompt({ availableTools: [], citationsMode: "inline" });
-        return { text: lines.join("\n") };
+      async buildPromptSection(params) {
+        return buildLegacyPromptSection(memoryManager, params);
       }
     },
     flush: {

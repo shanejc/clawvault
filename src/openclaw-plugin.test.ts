@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import clawvaultPlugin from "./openclaw-plugin.js";
 import type { ClawVaultPluginConfig } from "./plugin/config.js";
+import { ClawVaultMemoryManager } from "./plugin/memory-manager.js";
 
 /*
 Expected preset automation matrix (keep in sync with src/openclaw-plugin.ts):
@@ -197,6 +198,20 @@ describe("openclaw plugin registration", () => {
   });
 
   it("registers substrate + memory contract surfaces synchronously", async () => {
+    const searchSpy = vi.spyOn(ClawVaultMemoryManager.prototype, "search").mockResolvedValue([{
+      path: "projects/example.md",
+      startLine: 1,
+      endLine: 1,
+      score: 0.9,
+      snippet: "remembered context",
+      layer: "vault",
+      category: "projects",
+      provenance: {
+        source: "clawvault",
+        relPath: "projects/example.md"
+      }
+    }]);
+
     const {
       result,
       registerMemoryCapability,
@@ -256,6 +271,17 @@ describe("openclaw plugin registration", () => {
     expect(defaultManager).toBeDefined();
     expect(typeof (defaultManager as { search?: unknown })?.search).toBe("function");
     expect(scopedManagerA).toBe(scopedManagerB);
+
+    const legacyPrompt = await capability.prompt?.buildPromptSection({
+      query: "what did we decide",
+      sessionKey: "agent/alpha/session-1"
+    });
+    expect(legacyPrompt?.text).toContain("ClawVault memory matches");
+    expect(legacyPrompt?.text).toContain("remembered context");
+    expect(searchSpy).toHaveBeenCalledWith("what did we decide", expect.objectContaining({
+      sessionKey: "agent/alpha/session-1"
+    }));
+    searchSpy.mockRestore();
 
   });
 
