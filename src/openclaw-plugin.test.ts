@@ -211,6 +211,7 @@ describe("openclaw plugin registration", () => {
         relPath: "projects/example.md"
       }
     }]);
+    const syncSpy = vi.spyOn(ClawVaultMemoryManager.prototype, "sync").mockResolvedValue();
 
     const {
       result,
@@ -243,12 +244,12 @@ describe("openclaw plugin registration", () => {
       embedding?: { probeAvailability?: unknown; isVectorAvailable?: unknown };
     };
     const runtime = registerMemoryRuntime.mock.calls[0]?.[0] as {
-      getMemorySearchManager?: unknown;
+      getMemorySearchManager?: (params: { cfg: unknown; agentId: string }) => Promise<{ manager: { search?: unknown } | null }>;
       resolveMemoryBackendConfig?: unknown;
       closeAllMemorySearchManagers?: unknown;
     };
     const prompt = registerMemoryPromptSection.mock.calls[0]?.[0] as ((params: unknown) => string[]);
-    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params: unknown) => { shouldFlush: boolean; note?: string } | null);
+    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params: unknown) => unknown | null);
     const embedding = registerMemoryEmbeddingProvider.mock.calls[0]?.[0] as { id?: unknown; probeAvailability?: unknown; isVectorAvailable?: unknown };
 
     expect(capability.runtime).toBe(runtime);
@@ -265,14 +266,14 @@ describe("openclaw plugin registration", () => {
     expect(embedding.probeAvailability).toBeTypeOf("function");
     expect(embedding.isVectorAvailable).toBeTypeOf("function");
 
-    const defaultManager = await runtime.getMemorySearchManager?.({});
-    const scopedManagerA = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
-    const scopedManagerB = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
+    const defaultManager = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "main" });
+    const scopedManagerA = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "alpha" });
+    const scopedManagerB = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "alpha" });
     expect(defaultManager).toBeDefined();
-    expect(typeof (defaultManager as { search?: unknown })?.search).toBe("function");
-    expect(scopedManagerA).toBe(scopedManagerB);
+    expect(typeof (defaultManager as { manager?: { search?: unknown } })?.manager?.search).toBe("function");
+    expect(scopedManagerA).toEqual(scopedManagerB);
 
-    const legacyPrompt = await capability.prompt?.buildPromptSection({
+    const legacyPrompt = await (capability.prompt?.buildPromptSection as ((params: { query: string; sessionKey?: string }) => Promise<{ text: string }>))?.({
       query: "what did we decide",
       sessionKey: "agent/alpha/session-1"
     });
@@ -283,6 +284,43 @@ describe("openclaw plugin registration", () => {
     }));
     searchSpy.mockRestore();
 
+    const promptLines = prompt({ availableTools: new Set(["memory_search"]), citationsMode: "full" });
+    expect(promptLines.join("\n")).toContain("memory_search");
+
+    const resolvedFlush = flush({
+      cfg: {
+        timezone: "UTC"
+      },
+      nowMs: Date.UTC(2026, 0, 2, 12, 0, 0)
+    }) as {
+      softThresholdTokens: number;
+      forceFlushTranscriptBytes: number;
+      reserveTokensFloor: number;
+      prompt: string;
+      systemPrompt: string;
+      relativePath: string;
+    };
+    expect(resolvedFlush.softThresholdTokens).toBe(4000);
+    expect(resolvedFlush.forceFlushTranscriptBytes).toBe(2 * 1024 * 1024);
+    expect(resolvedFlush.reserveTokensFloor).toBe(20000);
+    expect(resolvedFlush.relativePath).toBe("memory/2026-01-02.md");
+    expect(resolvedFlush.prompt).toContain("NO_REPLY");
+    expect(resolvedFlush.systemPrompt).toContain("NO_REPLY");
+
+    const legacyFlushPlan = await capability.flush?.buildFlushPlan?.({
+      reason: "manual-checkpoint",
+      force: true
+    });
+    expect(legacyFlushPlan).toEqual({
+      shouldFlush: true,
+      note: "sync:manual-checkpoint"
+    });
+    expect(syncSpy).toHaveBeenCalledWith({
+      reason: "manual-checkpoint",
+      force: true
+    });
+
+    syncSpy.mockRestore();
   });
 
   it("keeps plugins.slots.memory return path as compatibility fallback when capability API is absent", () => {

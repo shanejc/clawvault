@@ -262,7 +262,9 @@ export type OpenClawPluginApi = {
   registerMemoryCapability?: (capability: OpenClawMemoryCapabilityRegistration) => void;
   registerMemoryRuntime?: (runtime: OpenClawMemoryRuntimeRegistration) => void;
   registerMemoryPromptSection?: (builder: OpenClawMemoryPromptSectionRegistration) => void;
-  registerMemoryFlushPlan?: (resolver: OpenClawMemoryFlushPlanRegistration) => void;
+  registerMemoryFlushPlanResolver?: (resolver: OpenClawMemoryFlushPlanResolverRegistration) => void;
+  // Older draft name kept for compatibility.
+  registerMemoryFlushPlan?: (resolver: OpenClawMemoryFlushPlanResolverRegistration) => void;
   registerMemoryEmbeddingProvider?: (
     adapter: OpenClawMemoryEmbeddingProviderAdapterRegistration,
     options?: OpenClawMemoryEmbeddingProviderOptions
@@ -281,33 +283,42 @@ export type OpenClawPluginApi = {
 };
 
 export type OpenClawMemoryRuntimeRegistration = {
-  getMemorySearchManager: (params?: {
-    sessionKey?: string;
-    agentId?: string;
-    workspaceDir?: string;
-  }) => Promise<ClawVaultMemoryManagerLike>;
-  resolveMemoryBackendConfig: (params?: {
-    sessionKey?: string;
-    agentId?: string;
-    workspaceDir?: string;
+  getMemorySearchManager: (params: {
+    cfg: unknown;
+    agentId: string;
+    purpose?: "default" | "status";
+  }) => Promise<{ manager: ClawVaultMemoryManagerLike | null; error?: string }>;
+  resolveMemoryBackendConfig: (params: {
+    cfg: unknown;
+    agentId: string;
   }) => {
-    backend: string;
-    vaultPath: string | null;
-    provider?: string;
-    model?: string;
+    backend: "builtin" | "qmd";
+    qmd?: { command?: string };
   };
   closeAllMemorySearchManagers?: () => Promise<void>;
 };
 
 export type OpenClawMemoryPromptSectionRegistration = (params: {
-  availableTools?: string[];
+  availableTools: Set<string>;
   citationsMode?: string;
 }) => string[];
 
-export type OpenClawMemoryFlushPlanRegistration = (params?: Record<string, unknown>) => {
-  shouldFlush: boolean;
-  note?: string;
-} | null;
+export type OpenClawMemoryFlushPlan = {
+  softThresholdTokens: number;
+  forceFlushTranscriptBytes: number;
+  reserveTokensFloor: number;
+  prompt: string;
+  systemPrompt: string;
+  relativePath: string;
+};
+
+export type OpenClawMemoryFlushPlanResolverRegistration = (params: {
+  cfg?: unknown;
+  nowMs?: number;
+}) => OpenClawMemoryFlushPlan | null;
+
+// Backward compatibility aliases for older OpenClaw contract drafts.
+export type OpenClawMemoryFlushPlanRegistration = OpenClawMemoryFlushPlanResolverRegistration;
 
 export type OpenClawMemoryEmbeddingProviderAdapterRegistration = {
   id: string;
