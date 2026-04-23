@@ -19,7 +19,6 @@ import {
   createMemoryWriteBootToolFactory,
   createMemoryWriteVaultToolFactory
 } from "./plugin/memory-write-tools.js";
-import { resolveVaultPathForAgent } from "./plugin/clawvault-cli.js";
 import { ClawVaultPluginRuntimeState } from "./plugin/runtime-state.js";
 import { createBeforePromptBuildHandler } from "./plugin/hooks/before-prompt-build.js";
 import { createMessageSendingHandler } from "./plugin/hooks/message-sending.js";
@@ -43,7 +42,7 @@ import type {
   OpenClawMemoryCapabilityRegistration,
   OpenClawMemoryEmbeddingProviderAdapterRegistration,
   OpenClawMemoryEmbeddingRegistration,
-  OpenClawMemoryFlushPlanRegistration,
+  OpenClawMemoryFlushPlanResolverRegistration,
   OpenClawMemoryFlushRegistration,
   OpenClawMemoryPromptRegistration,
   OpenClawMemoryPromptSectionRegistration,
@@ -89,6 +88,25 @@ const LEGACY_AUTOMATION_CONFIG_KEYS: ReadonlyArray<keyof ClawVaultPluginConfig> 
   "enforceCommunicationProtocol",
   "enableMessageSendingFilter"
 ];
+const DEFAULT_MEMORY_FLUSH_SOFT_TOKENS = 4000;
+const DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MEMORY_FLUSH_RESERVE_TOKENS_FLOOR = 20000;
+const DEFAULT_MEMORY_FLUSH_PROMPT = [
+  "Pre-compaction memory flush.",
+  "Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).",
+  "Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.",
+  "If memory/YYYY-MM-DD.md already exists, APPEND new content only and do not overwrite existing entries.",
+  "Do NOT create timestamped variant files (e.g., YYYY-MM-DD-HHMM.md); always use the canonical YYYY-MM-DD.md filename.",
+  "If nothing to store, reply with NO_REPLY."
+].join(" ");
+const DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT = [
+  "Pre-compaction memory flush turn.",
+  "The session is near auto-compaction; capture durable memories to disk.",
+  "Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).",
+  "Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.",
+  "If memory/YYYY-MM-DD.md already exists, APPEND new content only and do not overwrite existing entries.",
+  "You may reply, but usually NO_REPLY is correct."
+].join(" ");
 
 function isOnboardingPromptedInProcess(): boolean {
   return (globalThis as Record<string, unknown>)[ONBOARDING_PROMPTED_PROCESS_KEY] === true;
@@ -149,6 +167,66 @@ function getEffectiveHookConfig(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getRecordField(value: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const nested = value[key];
+  return isRecord(nested) ? nested : null;
+}
+
+function getStringField(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const raw = value[key];
+  return typeof raw === "string" ? raw : undefined;
+}
+
+function getNumberField(value: unknown, key: string): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const raw = value[key];
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+}
+
+function parseNonNegativeByteSize(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  const match = /^(\d+)\s*(b|kb|mb|gb|tb)?$/i.exec(trimmed);
+  if (!match?.[1]) return undefined;
+  const base = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(base) || base < 0) return undefined;
+  const suffix = (match[2] ?? "b").toLowerCase();
+  const scale = suffix === "tb" ? 1024 ** 4
+    : suffix === "gb" ? 1024 ** 3
+      : suffix === "mb" ? 1024 ** 2
+        : suffix === "kb" ? 1024
+          : 1;
+  return Math.floor(base * scale);
+}
+
+function formatDateStampInTimezone(nowMs: number, timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date(nowMs));
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch {
+    // fall through to UTC fallback
+  }
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+function resolveOpenClawDefaultsConfig(cfg: unknown): Record<string, unknown> | null {
+  const agents = getRecordField(cfg, "agents");
+  return getRecordField(agents, "defaults");
 }
 
 async function dispatchPackCallback<K extends PluginHookName>(
@@ -1016,22 +1094,27 @@ function createMemoryRuntimeRegistration(
 
   return {
     async getMemorySearchManager(params) {
-      return getOrCreateScopedManager(params);
+      const scoped = getOrCreateScopedManager({
+        agentId: params?.agentId,
+        workspaceDir: undefined
+      });
+      return { manager: scoped };
     },
     resolveMemoryBackendConfig: (params) => {
-      const sessionKey = typeof params?.sessionKey === "string" ? params.sessionKey : "";
-      const agentId = params?.agentId
-        ?? extractAgentIdFromSessionKey(sessionKey)
-        ?? "main";
       const providerStatus = memoryManager.status();
+      if (providerStatus.backend === "qmd") {
+        const defaults = resolveOpenClawDefaultsConfig(params?.cfg);
+        const memorySearch = getRecordField(defaults, "memorySearch");
+        const qmd = getRecordField(memorySearch, "qmd");
+        return {
+          backend: "qmd" as const,
+          qmd: {
+            command: getStringField(qmd, "command")
+          }
+        };
+      }
       return {
-        backend: providerStatus.backend,
-        vaultPath: resolveVaultPathForAgent(pluginConfig, {
-          agentId,
-          cwd: params?.workspaceDir
-        }),
-        provider: providerStatus.provider,
-        model: providerStatus.model
+        backend: "builtin" as const
       };
     },
     closeAllMemorySearchManagers: async () => {
@@ -1046,8 +1129,8 @@ function createMemoryRuntimeRegistration(
 function createMemoryPromptRegistration(): OpenClawMemoryPromptSectionRegistration {
   return (params) => {
     const lines: string[] = [];
-    if (Array.isArray(params.availableTools) && params.availableTools.length > 0) {
-      lines.push(`[ClawVault] Available memory tools: ${params.availableTools.join(", ")}`);
+    if (params.availableTools instanceof Set && params.availableTools.size > 0) {
+      lines.push(`[ClawVault] Available memory tools: ${[...params.availableTools].join(", ")}`);
     }
     if (typeof params.citationsMode === "string" && params.citationsMode.trim().length > 0) {
       lines.push(`[ClawVault] Citations mode: ${params.citationsMode.trim()}`);
@@ -1083,13 +1166,38 @@ async function buildLegacyPromptSection(
   return { text: `ClawVault memory matches:\n${lines.join("\n")}` };
 }
 
-function createMemoryFlushRegistration(): OpenClawMemoryFlushPlanRegistration {
-  return (params) => {
-    const reason = typeof params?.reason === "string" ? params.reason : "memory_runtime";
-    const force = params?.force === true;
+function createMemoryFlushPlanResolver(): OpenClawMemoryFlushPlanResolverRegistration {
+  return ({ cfg, nowMs } = {}) => {
+    const defaults = resolveOpenClawDefaultsConfig(cfg);
+    const compaction = getRecordField(defaults, "compaction");
+    const memoryFlush = getRecordField(compaction, "memoryFlush");
+
+    if (memoryFlush?.enabled === false) {
+      return null;
+    }
+
+    const resolvedNowMs = typeof nowMs === "number" && Number.isFinite(nowMs) ? nowMs : Date.now();
+    const timezone = getStringField(cfg, "timezone") ?? "UTC";
+    const dateStamp = formatDateStampInTimezone(resolvedNowMs, timezone);
+
+    const softThresholdTokens = Math.max(0, Math.floor(
+      getNumberField(memoryFlush, "softThresholdTokens") ?? DEFAULT_MEMORY_FLUSH_SOFT_TOKENS
+    ));
+    const reserveTokensFloor = Math.max(0, Math.floor(
+      getNumberField(compaction, "reserveTokensFloor") ?? DEFAULT_MEMORY_FLUSH_RESERVE_TOKENS_FLOOR
+    ));
+    const forceFlushTranscriptBytes = parseNonNegativeByteSize(memoryFlush?.forceFlushTranscriptBytes)
+      ?? DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES;
+    const promptTemplate = getStringField(memoryFlush, "prompt") ?? DEFAULT_MEMORY_FLUSH_PROMPT;
+    const systemPromptTemplate = getStringField(memoryFlush, "systemPrompt") ?? DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT;
+
     return {
-      shouldFlush: force || reason.length > 0,
-      note: `sync:${reason}`
+      softThresholdTokens,
+      forceFlushTranscriptBytes,
+      reserveTokensFloor,
+      prompt: promptTemplate.replaceAll("YYYY-MM-DD", dateStamp),
+      systemPrompt: systemPromptTemplate.replaceAll("YYYY-MM-DD", dateStamp),
+      relativePath: `memory/${dateStamp}.md`
     };
   };
 }
@@ -1102,6 +1210,41 @@ function createMemoryEmbeddingRegistration(memoryManager: ClawVaultMemoryManager
   };
 }
 
+function createLegacyMemoryFlushRegistration(memoryManager: ClawVaultMemoryManager): OpenClawMemoryFlushRegistration {
+  return {
+    async buildFlushPlan(params) {
+      const reason = typeof params?.reason === "string" && params.reason.trim().length > 0
+        ? params.reason.trim()
+        : "memory_runtime";
+      const force = params?.force === true;
+      const shouldFlush = force || reason.length > 0;
+      if (shouldFlush) {
+        await memoryManager.sync({
+          reason,
+          force
+        });
+      }
+      return {
+        shouldFlush,
+        note: `sync:${reason}`
+      };
+    }
+  };
+}
+
+function createLegacyMemoryFlushPlanRegistration(): (params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } {
+  return (params) => {
+    const reason = typeof params?.reason === "string" && params.reason.trim().length > 0
+      ? params.reason.trim()
+      : "memory_runtime";
+    const force = params?.force === true;
+    return {
+      shouldFlush: force || reason.length > 0,
+      note: `sync:${reason}`
+    };
+  };
+}
+
 function registerMemoryContractSurface(
   api: OpenClawPluginApi,
   memoryManager: ClawVaultMemoryManager,
@@ -1109,7 +1252,9 @@ function registerMemoryContractSurface(
 ): boolean {
   const runtime = createMemoryRuntimeRegistration(memoryManager, pluginConfig);
   const prompt = createMemoryPromptRegistration();
-  const flush = createMemoryFlushRegistration();
+  const flush = createMemoryFlushPlanResolver();
+  const legacyFlushPlan = createLegacyMemoryFlushPlanRegistration();
+  const legacyFlushRegistration = createLegacyMemoryFlushRegistration(memoryManager);
   const embedding = createMemoryEmbeddingRegistration(memoryManager);
   const capability: OpenClawMemoryCapabilityRegistration = {
     runtime,
@@ -1118,18 +1263,7 @@ function registerMemoryContractSurface(
         return buildLegacyPromptSection(memoryManager, params);
       }
     },
-    flush: {
-      async buildFlushPlan(params) {
-        const plan = flush(params as Record<string, unknown>);
-        if (plan?.shouldFlush) {
-          await memoryManager.sync({
-            reason: params?.reason,
-            force: params?.force
-          });
-        }
-        return plan ?? { shouldFlush: false };
-      }
-    },
+    flush: legacyFlushRegistration,
     embedding: {
       probeAvailability: embedding.probeAvailability,
       isVectorAvailable: embedding.isVectorAvailable
@@ -1152,9 +1286,18 @@ function registerMemoryContractSurface(
     maybeRegisterMemoryPromptSection(prompt);
   }
 
-  const maybeRegisterMemoryFlushPlan = api.registerMemoryFlushPlan;
+  const maybeRegisterMemoryFlushPlanResolver = typeof api.registerMemoryFlushPlanResolver === "function"
+    ? api.registerMemoryFlushPlanResolver
+    : null;
+  if (typeof maybeRegisterMemoryFlushPlanResolver === "function") {
+    maybeRegisterMemoryFlushPlanResolver(flush);
+  }
+
+  const maybeRegisterMemoryFlushPlan = typeof api.registerMemoryFlushPlan === "function"
+    ? api.registerMemoryFlushPlan
+    : null;
   if (typeof maybeRegisterMemoryFlushPlan === "function") {
-    maybeRegisterMemoryFlushPlan(flush);
+    maybeRegisterMemoryFlushPlan(legacyFlushPlan);
   }
 
   const maybeRegisterMemoryEmbeddingProvider = api.registerMemoryEmbeddingProvider;
@@ -1170,7 +1313,7 @@ function registerMemoryContractSurface(
 
   const maybeRegisterMemoryFlush = api.registerMemoryFlush;
   if (typeof maybeRegisterMemoryFlush === "function") {
-    const legacyFlush: OpenClawMemoryFlushRegistration = capability.flush;
+    const legacyFlush: OpenClawMemoryFlushRegistration = legacyFlushRegistration;
     maybeRegisterMemoryFlush(legacyFlush);
   }
 

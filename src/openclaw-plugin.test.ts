@@ -49,6 +49,7 @@ describe("openclaw plugin registration", () => {
     const registerMemoryCapability = vi.fn();
     const registerMemoryRuntime = vi.fn();
     const registerMemoryPromptSection = vi.fn();
+    const registerMemoryFlushPlanResolver = vi.fn();
     const registerMemoryFlushPlan = vi.fn();
     const registerMemoryEmbeddingProvider = vi.fn();
 
@@ -64,6 +65,7 @@ describe("openclaw plugin registration", () => {
       ...(options.includeCapabilityApi === false ? {} : { registerMemoryCapability }),
       registerMemoryRuntime,
       registerMemoryPromptSection,
+      registerMemoryFlushPlanResolver,
       registerMemoryFlushPlan,
       registerMemoryEmbeddingProvider,
       emitRuntimeEvent: vi.fn(),
@@ -83,6 +85,7 @@ describe("openclaw plugin registration", () => {
       registerMemoryCapability,
       registerMemoryRuntime,
       registerMemoryPromptSection,
+      registerMemoryFlushPlanResolver,
       registerMemoryFlushPlan,
       registerMemoryEmbeddingProvider,
       logger,
@@ -211,12 +214,14 @@ describe("openclaw plugin registration", () => {
         relPath: "projects/example.md"
       }
     }]);
+    const syncSpy = vi.spyOn(ClawVaultMemoryManager.prototype, "sync").mockResolvedValue();
 
     const {
       result,
       registerMemoryCapability,
       registerMemoryRuntime,
       registerMemoryPromptSection,
+      registerMemoryFlushPlanResolver,
       registerMemoryFlushPlan,
       registerMemoryEmbeddingProvider
     } = registerWithConfig();
@@ -230,6 +235,7 @@ describe("openclaw plugin registration", () => {
     expect(registerMemoryCapability).toHaveBeenCalledTimes(1);
     expect(registerMemoryRuntime).toHaveBeenCalledTimes(1);
     expect(registerMemoryPromptSection).toHaveBeenCalledTimes(1);
+    expect(registerMemoryFlushPlanResolver).toHaveBeenCalledTimes(1);
     expect(registerMemoryFlushPlan).toHaveBeenCalledTimes(1);
     expect(registerMemoryEmbeddingProvider).toHaveBeenCalledTimes(1);
     const capability = registerMemoryCapability.mock.calls[0]?.[0] as {
@@ -243,12 +249,13 @@ describe("openclaw plugin registration", () => {
       embedding?: { probeAvailability?: unknown; isVectorAvailable?: unknown };
     };
     const runtime = registerMemoryRuntime.mock.calls[0]?.[0] as {
-      getMemorySearchManager?: unknown;
+      getMemorySearchManager?: (params: { cfg: unknown; agentId: string }) => Promise<{ manager: { search?: unknown } | null }>;
       resolveMemoryBackendConfig?: unknown;
       closeAllMemorySearchManagers?: unknown;
     };
     const prompt = registerMemoryPromptSection.mock.calls[0]?.[0] as ((params: unknown) => string[]);
-    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params: unknown) => { shouldFlush: boolean; note?: string } | null);
+    const flushResolver = registerMemoryFlushPlanResolver.mock.calls[0]?.[0] as ((params: unknown) => unknown | null);
+    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } | null);
     const embedding = registerMemoryEmbeddingProvider.mock.calls[0]?.[0] as { id?: unknown; probeAvailability?: unknown; isVectorAvailable?: unknown };
 
     expect(capability.runtime).toBe(runtime);
@@ -260,19 +267,20 @@ describe("openclaw plugin registration", () => {
     expect(runtime.resolveMemoryBackendConfig).toBeTypeOf("function");
     expect(runtime.closeAllMemorySearchManagers).toBeTypeOf("function");
     expect(prompt).toBeTypeOf("function");
+    expect(flushResolver).toBeTypeOf("function");
     expect(flush).toBeTypeOf("function");
     expect(embedding.id).toBe("clawvault");
     expect(embedding.probeAvailability).toBeTypeOf("function");
     expect(embedding.isVectorAvailable).toBeTypeOf("function");
 
-    const defaultManager = await runtime.getMemorySearchManager?.({});
-    const scopedManagerA = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
-    const scopedManagerB = await runtime.getMemorySearchManager?.({ agentId: "alpha", workspaceDir: "/tmp/a" });
+    const defaultManager = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "main" });
+    const scopedManagerA = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "alpha" });
+    const scopedManagerB = await runtime.getMemorySearchManager?.({ cfg: {}, agentId: "alpha" });
     expect(defaultManager).toBeDefined();
-    expect(typeof (defaultManager as { search?: unknown })?.search).toBe("function");
-    expect(scopedManagerA).toBe(scopedManagerB);
+    expect(typeof (defaultManager as { manager?: { search?: unknown } })?.manager?.search).toBe("function");
+    expect(scopedManagerA).toEqual(scopedManagerB);
 
-    const legacyPrompt = await capability.prompt?.buildPromptSection({
+    const legacyPrompt = await (capability.prompt?.buildPromptSection as ((params: { query: string; sessionKey?: string }) => Promise<{ text: string }>))?.({
       query: "what did we decide",
       sessionKey: "agent/alpha/session-1"
     });
@@ -283,6 +291,48 @@ describe("openclaw plugin registration", () => {
     }));
     searchSpy.mockRestore();
 
+    const promptLines = prompt({ availableTools: new Set(["memory_search"]), citationsMode: "full" });
+    expect(promptLines.join("\n")).toContain("memory_search");
+
+    const resolvedFlush = flushResolver({
+      cfg: {
+        timezone: "UTC"
+      },
+      nowMs: Date.UTC(2026, 0, 2, 12, 0, 0)
+    }) as {
+      softThresholdTokens: number;
+      forceFlushTranscriptBytes: number;
+      reserveTokensFloor: number;
+      prompt: string;
+      systemPrompt: string;
+      relativePath: string;
+    };
+    expect(resolvedFlush.softThresholdTokens).toBe(4000);
+    expect(resolvedFlush.forceFlushTranscriptBytes).toBe(2 * 1024 * 1024);
+    expect(resolvedFlush.reserveTokensFloor).toBe(20000);
+    expect(resolvedFlush.relativePath).toBe("memory/2026-01-02.md");
+    expect(resolvedFlush.prompt).toContain("NO_REPLY");
+    expect(resolvedFlush.systemPrompt).toContain("NO_REPLY");
+    const legacyFlushPlanResolverResult = flush({ reason: "manual-checkpoint", force: false });
+    expect(legacyFlushPlanResolverResult).toEqual({
+      shouldFlush: true,
+      note: "sync:manual-checkpoint"
+    });
+
+    const legacyFlushPlan = await capability.flush?.buildFlushPlan?.({
+      reason: "manual-checkpoint",
+      force: true
+    });
+    expect(legacyFlushPlan).toEqual({
+      shouldFlush: true,
+      note: "sync:manual-checkpoint"
+    });
+    expect(syncSpy).toHaveBeenCalledWith({
+      reason: "manual-checkpoint",
+      force: true
+    });
+
+    syncSpy.mockRestore();
   });
 
   it("keeps plugins.slots.memory return path as compatibility fallback when capability API is absent", () => {
@@ -321,6 +371,7 @@ describe("openclaw plugin registration", () => {
         registerMemoryCapability: true as unknown as never,
         registerMemoryRuntime: "runtime" as unknown as never,
         registerMemoryPromptSection: 123 as unknown as never,
+        registerMemoryFlushPlanResolver: { enabled: true } as unknown as never,
         registerMemoryFlushPlan: { enabled: true } as unknown as never,
         registerMemoryEmbeddingProvider: [] as unknown as never
       });
@@ -328,6 +379,37 @@ describe("openclaw plugin registration", () => {
 
     expect(registerTool).toHaveBeenCalled();
     expect(on).toHaveBeenCalled();
+  });
+
+  it("registers legacy flush plan fallback when resolver is a non-function placeholder", () => {
+    const registerMemoryFlushPlan = vi.fn();
+    clawvaultPlugin.register({
+      id: "clawvault",
+      name: "ClawVault",
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      },
+      pluginConfig: {
+        vaultPath: "/tmp/does-not-exist"
+      },
+      registerTool: vi.fn(),
+      on: vi.fn((_: string, __: (...args: unknown[]) => unknown) => {}),
+      registerMemoryRuntime: vi.fn(),
+      registerMemoryPromptSection: vi.fn(),
+      registerMemoryFlushPlanResolver: { notAFunction: true } as unknown as never,
+      registerMemoryFlushPlan,
+      registerMemoryEmbeddingProvider: vi.fn()
+    });
+
+    expect(registerMemoryFlushPlan).toHaveBeenCalledTimes(1);
+    const fallback = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } | null);
+    expect(fallback?.({ reason: "compat-check" })).toEqual({
+      shouldFlush: true,
+      note: "sync:compat-check"
+    });
   });
 
   it("keeps runtime entry compatibility for non-OpenClaw registry objects", () => {
