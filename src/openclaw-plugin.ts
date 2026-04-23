@@ -1232,6 +1232,19 @@ function createLegacyMemoryFlushRegistration(memoryManager: ClawVaultMemoryManag
   };
 }
 
+function createLegacyMemoryFlushPlanRegistration(): (params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } {
+  return (params) => {
+    const reason = typeof params?.reason === "string" && params.reason.trim().length > 0
+      ? params.reason.trim()
+      : "memory_runtime";
+    const force = params?.force === true;
+    return {
+      shouldFlush: force || reason.length > 0,
+      note: `sync:${reason}`
+    };
+  };
+}
+
 function registerMemoryContractSurface(
   api: OpenClawPluginApi,
   memoryManager: ClawVaultMemoryManager,
@@ -1240,6 +1253,7 @@ function registerMemoryContractSurface(
   const runtime = createMemoryRuntimeRegistration(memoryManager, pluginConfig);
   const prompt = createMemoryPromptRegistration();
   const flush = createMemoryFlushPlanResolver();
+  const legacyFlushPlan = createLegacyMemoryFlushPlanRegistration();
   const legacyFlushRegistration = createLegacyMemoryFlushRegistration(memoryManager);
   const embedding = createMemoryEmbeddingRegistration(memoryManager);
   const capability: OpenClawMemoryCapabilityRegistration = {
@@ -1272,9 +1286,18 @@ function registerMemoryContractSurface(
     maybeRegisterMemoryPromptSection(prompt);
   }
 
-  const maybeRegisterMemoryFlushPlanResolver = api.registerMemoryFlushPlanResolver ?? api.registerMemoryFlushPlan;
+  const maybeRegisterMemoryFlushPlanResolver = typeof api.registerMemoryFlushPlanResolver === "function"
+    ? api.registerMemoryFlushPlanResolver
+    : null;
   if (typeof maybeRegisterMemoryFlushPlanResolver === "function") {
     maybeRegisterMemoryFlushPlanResolver(flush);
+  }
+
+  const maybeRegisterMemoryFlushPlan = typeof api.registerMemoryFlushPlan === "function"
+    ? api.registerMemoryFlushPlan
+    : null;
+  if (typeof maybeRegisterMemoryFlushPlan === "function") {
+    maybeRegisterMemoryFlushPlan(legacyFlushPlan);
   }
 
   const maybeRegisterMemoryEmbeddingProvider = api.registerMemoryEmbeddingProvider;

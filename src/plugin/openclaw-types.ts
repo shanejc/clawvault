@@ -264,7 +264,7 @@ export type OpenClawPluginApi = {
   registerMemoryPromptSection?: (builder: OpenClawMemoryPromptSectionRegistration) => void;
   registerMemoryFlushPlanResolver?: (resolver: OpenClawMemoryFlushPlanResolverRegistration) => void;
   // Older draft name kept for compatibility.
-  registerMemoryFlushPlan?: (resolver: OpenClawMemoryFlushPlanResolverRegistration) => void;
+  registerMemoryFlushPlan?: (resolver: OpenClawLegacyMemoryFlushPlanRegistration) => void;
   registerMemoryEmbeddingProvider?: (
     adapter: OpenClawMemoryEmbeddingProviderAdapterRegistration,
     options?: OpenClawMemoryEmbeddingProviderOptions
@@ -317,8 +317,13 @@ export type OpenClawMemoryFlushPlanResolverRegistration = (params: {
   nowMs?: number;
 }) => OpenClawMemoryFlushPlan | null;
 
-// Backward compatibility aliases for older OpenClaw contract drafts.
-export type OpenClawMemoryFlushPlanRegistration = OpenClawMemoryFlushPlanResolverRegistration;
+export type OpenClawLegacyMemoryFlushPlanRegistration = (params?: {
+  reason?: string;
+  force?: boolean;
+}) => {
+  shouldFlush: boolean;
+  note?: string;
+} | null;
 
 export type OpenClawMemoryEmbeddingProviderAdapterRegistration = {
   id: string;
