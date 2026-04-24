@@ -236,7 +236,7 @@ describe("openclaw plugin registration", () => {
     expect(registerMemoryRuntime).toHaveBeenCalledTimes(1);
     expect(registerMemoryPromptSection).toHaveBeenCalledTimes(1);
     expect(registerMemoryFlushPlanResolver).toHaveBeenCalledTimes(1);
-    expect(registerMemoryFlushPlan).toHaveBeenCalledTimes(1);
+    expect(registerMemoryFlushPlan).not.toHaveBeenCalled();
     expect(registerMemoryEmbeddingProvider).toHaveBeenCalledTimes(1);
     const capability = registerMemoryCapability.mock.calls[0]?.[0] as {
       runtime?: {
@@ -255,7 +255,6 @@ describe("openclaw plugin registration", () => {
     };
     const prompt = registerMemoryPromptSection.mock.calls[0]?.[0] as ((params: unknown) => string[]);
     const flushResolver = registerMemoryFlushPlanResolver.mock.calls[0]?.[0] as ((params: unknown) => unknown | null);
-    const flush = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } | null);
     const embedding = registerMemoryEmbeddingProvider.mock.calls[0]?.[0] as { id?: unknown; probeAvailability?: unknown; isVectorAvailable?: unknown };
 
     expect(capability.runtime).toBe(runtime);
@@ -268,7 +267,6 @@ describe("openclaw plugin registration", () => {
     expect(runtime.closeAllMemorySearchManagers).toBeTypeOf("function");
     expect(prompt).toBeTypeOf("function");
     expect(flushResolver).toBeTypeOf("function");
-    expect(flush).toBeTypeOf("function");
     expect(embedding.id).toBe("clawvault");
     expect(embedding.probeAvailability).toBeTypeOf("function");
     expect(embedding.isVectorAvailable).toBeTypeOf("function");
@@ -313,12 +311,6 @@ describe("openclaw plugin registration", () => {
     expect(resolvedFlush.relativePath).toBe("memory/2026-01-02.md");
     expect(resolvedFlush.prompt).toContain("NO_REPLY");
     expect(resolvedFlush.systemPrompt).toContain("NO_REPLY");
-    const legacyFlushPlanResolverResult = flush({ reason: "manual-checkpoint", force: false });
-    expect(legacyFlushPlanResolverResult).toEqual({
-      shouldFlush: true,
-      note: "sync:manual-checkpoint"
-    });
-
     const legacyFlushPlan = await capability.flush?.buildFlushPlan?.({
       reason: "manual-checkpoint",
       force: true

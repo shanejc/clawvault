@@ -1289,14 +1289,16 @@ function registerMemoryContractSurface(
   const maybeRegisterMemoryFlushPlanResolver = typeof api.registerMemoryFlushPlanResolver === "function"
     ? api.registerMemoryFlushPlanResolver
     : null;
+  let didRegisterMemoryFlushPlanResolver = false;
   if (typeof maybeRegisterMemoryFlushPlanResolver === "function") {
     maybeRegisterMemoryFlushPlanResolver(flush);
+    didRegisterMemoryFlushPlanResolver = true;
   }
 
   const maybeRegisterMemoryFlushPlan = typeof api.registerMemoryFlushPlan === "function"
     ? api.registerMemoryFlushPlan
     : null;
-  if (typeof maybeRegisterMemoryFlushPlan === "function") {
+  if (!didRegisterMemoryFlushPlanResolver && typeof maybeRegisterMemoryFlushPlan === "function") {
     maybeRegisterMemoryFlushPlan(legacyFlushPlan);
   }
 
