@@ -1232,19 +1232,6 @@ function createLegacyMemoryFlushRegistration(memoryManager: ClawVaultMemoryManag
   };
 }
 
-function createLegacyMemoryFlushPlanRegistration(): (params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } {
-  return (params) => {
-    const reason = typeof params?.reason === "string" && params.reason.trim().length > 0
-      ? params.reason.trim()
-      : "memory_runtime";
-    const force = params?.force === true;
-    return {
-      shouldFlush: force || reason.length > 0,
-      note: `sync:${reason}`
-    };
-  };
-}
-
 function registerMemoryContractSurface(
   api: OpenClawPluginApi,
   memoryManager: ClawVaultMemoryManager,
@@ -1253,7 +1240,6 @@ function registerMemoryContractSurface(
   const runtime = createMemoryRuntimeRegistration(memoryManager, pluginConfig);
   const prompt = createMemoryPromptRegistration();
   const flush = createMemoryFlushPlanResolver();
-  const legacyFlushPlan = createLegacyMemoryFlushPlanRegistration();
   const legacyFlushRegistration = createLegacyMemoryFlushRegistration(memoryManager);
   const embedding = createMemoryEmbeddingRegistration(memoryManager);
   const capability: OpenClawMemoryCapabilityRegistration = {
@@ -1299,7 +1285,7 @@ function registerMemoryContractSurface(
     ? api.registerMemoryFlushPlan
     : null;
   if (!didRegisterMemoryFlushPlanResolver && typeof maybeRegisterMemoryFlushPlan === "function") {
-    maybeRegisterMemoryFlushPlan(legacyFlushPlan);
+    maybeRegisterMemoryFlushPlan(flush);
   }
 
   const maybeRegisterMemoryEmbeddingProvider = api.registerMemoryEmbeddingProvider;

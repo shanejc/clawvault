@@ -373,7 +373,7 @@ describe("openclaw plugin registration", () => {
     expect(on).toHaveBeenCalled();
   });
 
-  it("registers legacy flush plan fallback when resolver is a non-function placeholder", () => {
+  it("registers modern flush resolver via registerMemoryFlushPlan when resolver slot is unavailable", () => {
     const registerMemoryFlushPlan = vi.fn();
     clawvaultPlugin.register({
       id: "clawvault",
@@ -397,10 +397,26 @@ describe("openclaw plugin registration", () => {
     });
 
     expect(registerMemoryFlushPlan).toHaveBeenCalledTimes(1);
-    const fallback = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params?: { reason?: string; force?: boolean }) => { shouldFlush: boolean; note?: string } | null);
-    expect(fallback?.({ reason: "compat-check" })).toEqual({
-      shouldFlush: true,
-      note: "sync:compat-check"
+    const fallback = registerMemoryFlushPlan.mock.calls[0]?.[0] as ((params?: { cfg?: unknown; nowMs?: number }) => {
+      softThresholdTokens: number;
+      forceFlushTranscriptBytes: number;
+      reserveTokensFloor: number;
+      prompt: string;
+      systemPrompt: string;
+      relativePath: string;
+    } | null);
+    expect(fallback?.({
+      cfg: {
+        timezone: "UTC"
+      },
+      nowMs: Date.UTC(2026, 0, 2, 12, 0, 0)
+    })).toEqual({
+      softThresholdTokens: 4000,
+      forceFlushTranscriptBytes: 2 * 1024 * 1024,
+      reserveTokensFloor: 20000,
+      prompt: expect.stringContaining("NO_REPLY"),
+      systemPrompt: expect.stringContaining("NO_REPLY"),
+      relativePath: "memory/2026-01-02.md"
     });
   });
 
