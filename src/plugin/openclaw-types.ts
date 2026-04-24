@@ -263,8 +263,8 @@ export type OpenClawPluginApi = {
   registerMemoryRuntime?: (runtime: OpenClawMemoryRuntimeRegistration) => void;
   registerMemoryPromptSection?: (builder: OpenClawMemoryPromptSectionRegistration) => void;
   registerMemoryFlushPlanResolver?: (resolver: OpenClawMemoryFlushPlanResolverRegistration) => void;
-  // Older draft name kept for compatibility.
-  registerMemoryFlushPlan?: (resolver: OpenClawLegacyMemoryFlushPlanRegistration) => void;
+  // Older draft name kept for compatibility; modern OpenClaw builds may alias this to resolver registration.
+  registerMemoryFlushPlan?: (resolver: OpenClawMemoryFlushPlanResolverRegistration | OpenClawLegacyMemoryFlushPlanRegistration) => void;
   registerMemoryEmbeddingProvider?: (
     adapter: OpenClawMemoryEmbeddingProviderAdapterRegistration,
     options?: OpenClawMemoryEmbeddingProviderOptions
