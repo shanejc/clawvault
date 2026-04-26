@@ -487,6 +487,7 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
     query: string,
     opts: { maxResults?: number; minScore?: number; sessionKey?: string } = {}
   ): Promise<MemorySearchResult[]> {
+    console.log('[clawvault] MEMORY_SEARCH CALLED', { query, maxResults });
     const normalizedQuery = sanitizePromptForContext(query);
     if (!normalizedQuery) return [];
 
