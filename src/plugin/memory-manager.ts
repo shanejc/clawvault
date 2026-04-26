@@ -501,17 +501,17 @@ export class ClawVaultMemoryManager implements MemorySearchManager {
       : DEFAULT_MIN_SCORE;
 
     try {
-      this.options.logger?.debug(
+      this.options.logger?.debug?(
         `[clawvault] memory_search creating ClawVault instance for ${vaultPath}`
         );
       const vault = new ClawVault(vaultPath);
-      this.options.logger?.debug(
+      this.options.logger?.debug?(
         `[clawvault] memory_search loading vault...`
         );
       await vault.load();
       const registry = buildCategoryRegistry(vaultPath, this.options.pluginConfig);
       const sourceCategories = getRegistrySourceCategories(registry);
-      this.options.logger?.debug(
+      this.options.logger?.debug?(
         `[clawvault] memory_search calling find on vault with ${normalizedQuery}`
         );
       const results = await vault.find(normalizedQuery, {
